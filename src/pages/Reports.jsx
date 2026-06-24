@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, Fragment } from 'react'
+import { useLocation } from 'react-router-dom'
 import { supabase } from '../supabase'
 
 const resultColor = {
@@ -10,6 +11,7 @@ const resultColor = {
 }
 
 export default function Reports() {
+  const location = useLocation()
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -29,6 +31,15 @@ export default function Reports() {
   const previewRef = useRef(null)
 
   useEffect(() => { fetchPatients(); fetchSettings() }, [])
+
+  // لو المساعد الذكي وجّهنا هنا بمريض معين (لطباعة تقريره)، نحدده تلقائيًا أول ما المرضى تتحمل
+  useEffect(() => {
+    const targetId = location.state?.autoSelectPatientId
+    if (!loading && targetId && patients.length) {
+      const match = patients.find(p => p.id === targetId)
+      if (match) setSelectedPatient(match)
+    }
+  }, [loading, patients, location.state])
 
   const fetchPatients = async () => {
     const { data } = await supabase
