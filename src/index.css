@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  --primary: #005bbf;
+  --primary-container: #1a73e8;
+  --surface: #f8f9fa;
+  --surface-container: #ffffff;
+  --on-surface: #191c1d;
+  --on-surface-variant: #414754;
+  --outline: #727785;
+  --outline-variant: #c1c6d6;
+  --error: #ba1a1a;
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-body: 'Tajawal', sans-serif;
+}
+
+* {
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+}
+
+body {
+  background-color: var(--surface);
+  color: var(--on-surface);
+}
