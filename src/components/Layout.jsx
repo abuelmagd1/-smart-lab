@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabase'
 
 const navItems = [
@@ -29,6 +29,13 @@ export default function Layout() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [msg, setMsg] = useState({ text: '', type: '' })
+
+  // شات "لابو" محفوظ هنا طول ما الـ Layout مش بيعمل remount
+  // (يعني طول ما إنت جوه السيستم ومنقلتش بين الصفحات بـ refresh كامل)
+  const [chatMessages, setChatMessages] = useState([
+    { role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي تعمله وأنا هعمله فوراً!' }
+  ])
+  const chatHistoryRef = useRef([])
 
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('appSettings')
@@ -77,6 +84,10 @@ export default function Layout() {
   }
 
   const fetchAdminNotifications = async (userId) => {
+    // مسح الإشعارات اللي عدى عليها أسبوع كامل
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    await supabase.from('admin_notifications').delete().lt('created_at', weekAgo)
+
     const { data } = await supabase
       .from('admin_notifications')
       .select('*')
@@ -441,7 +452,7 @@ export default function Layout() {
           </div>
         )}
 
-        <Outlet context={{ settings }} />
+        <Outlet context={{ settings, chatMessages, setChatMessages, chatHistoryRef }} />
       </main>
     </div>
   )

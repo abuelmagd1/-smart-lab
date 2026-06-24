@@ -12,6 +12,10 @@ export default function AdminNotifications() {
   useEffect(() => { fetchData() }, [])
 
   const fetchData = async () => {
+    // مسح الإشعارات اللي عدى عليها أسبوع كامل
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    await supabase.from('admin_notifications').delete().lt('created_at', weekAgo)
+
     const { data: labsData } = await supabase
       .from('lab_settings')
       .select('user_id, lab_name, doctor_name')
@@ -69,7 +73,6 @@ export default function AdminNotifications() {
         </div>
       )}
 
-      {/* فورم الإرسال */}
       <div className="bg-white rounded-xl p-6 space-y-4 mb-6" style={{ border: '1px solid var(--outline-variant)' }}>
         <div>
           <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>المستلم</label>
@@ -112,7 +115,6 @@ export default function AdminNotifications() {
         </div>
       </div>
 
-      {/* الإشعارات المرسلة */}
       <h2 className="font-semibold mb-3" style={{ color: 'var(--on-surface)' }}>الإشعارات المرسلة</h2>
 
       {loading ? (

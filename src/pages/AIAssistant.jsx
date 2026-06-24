@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
 
 const apiKey = import.meta.env.VITE_GROQ_API_KEY
@@ -134,14 +134,11 @@ const TOOLS = [
 
 export default function AIAssistant() {
   const navigate = useNavigate()
-  const [messages, setMessages] = useState([
-    { role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي تعمله وأنا هعمله فوراً!' }
-  ])
+  const { chatMessages: messages, setChatMessages: setMessages, chatHistoryRef: historyRef } = useOutletContext()
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [listening, setListening] = useState(false)
   const messagesEndRef = useRef(null)
-  const historyRef = useRef([])
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
@@ -198,6 +195,7 @@ export default function AIAssistant() {
 
 قواعد التنفيذ (مهم جداً):
 - save_new_patient: لما حد يطلب تسجيل مريض جديد، متستخدمش الأداة فوراً. الأول لخّص كل البيانات اللي فهمتها (الاسم، السن، النوع، الدكتور لو موجود، التحاليل المطلوبة) في رسالة واضحة واسأله "البيانات صحيحة؟ أسجل كذا؟". لو رد بالموافقة (زي "آه" أو "تمام" أو "صح" أو "سجل")، استخدم save_new_patient فوراً بنفس البيانات. لو رد بالنفي (زي "لا" أو "مش كده") من غير ما يحدد إيه الغلط، اسأله فوراً "تمام، إيه اللي محتاج تعدله بالظبط؟" واستنى يحدد لك. بعد ما يحدد التعديل، حدّث البيانات في فهمك واعرض الملخص الكامل تاني للتأكيد قبل التسجيل، وكرر العملية لحد ما يوافق
+- save_test_result: احفظ النتيجة فوراً بدون سؤال (لو الطلب واضح)
 - open_patient_report: افتح التقرير فوراً
 - لو الطلب فيه نتيجة + طباعة (بدون تسجيل مريض جديد)، استخدم الأدوات المطلوبة بالترتيب في نفس الرد
 - لو قالك "ده غلط"، اسأله "إيه الصح؟" وبعد ما يقولك صلح فوراً بـ update_patient_info أو save_test_result
@@ -267,7 +265,6 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
     let args = {}
     try { args = JSON.parse(call.function.arguments || '{}') } catch { }
 
-    // إظهار حالة التنفيذ في الشات
     const showStatus = (text) => {
       setMessages(prev => [...prev, { role: 'status', content: text }])
     }
