@@ -4,6 +4,12 @@ import { supabase } from '../supabase'
 
 const apiKey = import.meta.env.VITE_GROQ_API_KEY
 
+const MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama3-70b-8192',
+  'mixtral-8x7b-32768',
+]
+
 const renderMarkdown = (text) => {
   if (!text) return ''
   return text
@@ -23,16 +29,16 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'save_new_patient',
-      description: 'يحفظ مريض جديد مباشرة في النظام بدون انتظار تأكيد. استخدمه فوراً لما يطلب المستخدم تسجيل مريض.',
+      description: 'يحفظ مريض جديد في النظام.',
       parameters: {
         type: 'object',
         properties: {
-          name: { type: 'string', description: 'اسم المريض كامل' },
-          age: { type: 'number', description: 'سن المريض' },
+          name: { type: 'string' },
+          age: { type: 'number' },
           gender: { type: 'string', enum: ['ذكر', 'أنثى'] },
-          phone: { type: 'string', description: 'رقم تليفون المريض (اختياري)' },
-          doctor: { type: 'string', description: 'اسم الطبيب المحوّل (اختياري)' },
-          tests: { type: 'array', items: { type: 'string' }, description: 'أسماء التحاليل المطلوبة' }
+          phone: { type: 'string' },
+          doctor: { type: 'string' },
+          tests: { type: 'array', items: { type: 'string' } }
         },
         required: ['name', 'age', 'gender']
       }
@@ -42,7 +48,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'save_test_result',
-      description: 'يحفظ نتيجة تحليل مباشرة بدون انتظار تأكيد.',
+      description: 'يحفظ نتيجة تحليل لمريض.',
       parameters: {
         type: 'object',
         properties: {
@@ -77,12 +83,10 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'delete_patient',
-      description: 'يمسح مريض وكل تحاليله من النظام.',
+      description: 'يمسح مريض وكل تحاليله.',
       parameters: {
         type: 'object',
-        properties: {
-          patient_name: { type: 'string' }
-        },
+        properties: { patient_name: { type: 'string' } },
         required: ['patient_name']
       }
     }
@@ -91,7 +95,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'add_tests_to_patient',
-      description: 'يضيف تحاليل جديدة لمريض موجود.',
+      description: 'يضيف تحاليل لمريض موجود.',
       parameters: {
         type: 'object',
         properties: {
@@ -106,12 +110,10 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'open_patient_report',
-      description: 'يفتح صفحة التقارير ويحدد مريض معين للطباعة.',
+      description: 'يفتح تقرير مريض للطباعة.',
       parameters: {
         type: 'object',
-        properties: {
-          patient_name: { type: 'string' }
-        },
+        properties: { patient_name: { type: 'string' } },
         required: ['patient_name']
       }
     }
@@ -119,18 +121,54 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'search_medical_info',
-      description: 'يبحث عن معلومات طبية دقيقة وحديثة.',
+      name: 'answer_question',
+      description: 'يجاوب على أي سؤال طبي أو عام.',
       parameters: {
         type: 'object',
-        properties: {
-          query: { type: 'string' }
-        },
+        properties: { query: { type: 'string' } },
         required: ['query']
       }
     }
   }
 ]
+
+const fetchWithRetry = async (body) => {
+  // جرب كل الموديلات مع tools
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({ ...body, model })
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.choices?.[0]?.message) return data
+        }
+      } catch { }
+      await new Promise(r => setTimeout(r, 800))
+    }
+  }
+
+  // last resort: جرب من غير tools
+  for (const model of MODELS) {
+    try {
+      const { tools, tool_choice, parallel_tool_calls, ...rest } = body
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ ...rest, model })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.choices?.[0]?.message) return data
+      }
+    } catch { }
+  }
+
+  return null
+}
 
 export default function AIAssistant() {
   const navigate = useNavigate()
@@ -158,6 +196,22 @@ export default function AIAssistant() {
     } catch { return [] }
   }
 
+  const findPatient = (patients, name) => {
+    if (!name) return null
+    const n = name.trim().toLowerCase()
+    return patients.find(p => p.name?.trim().toLowerCase() === n)
+      || patients.find(p => p.name?.toLowerCase().includes(n))
+      || patients.find(p => n.includes(p.name?.toLowerCase()))
+  }
+
+  const findTest = (tests, name) => {
+    if (!name) return null
+    const n = name.trim().toLowerCase()
+    return tests?.find(t => t.name?.toLowerCase() === n)
+      || tests?.find(t => t.name?.toLowerCase().includes(n))
+      || tests?.find(t => n.includes(t.name?.toLowerCase()))
+  }
+
   const sendMessage = async (text) => {
     const trimmed = text.trim()
     if (!trimmed || loading) return
@@ -165,158 +219,131 @@ export default function AIAssistant() {
     setInput('')
     setLoading(true)
     historyRef.current.push({ role: 'user', content: trimmed })
-    try {
-      await runAssistantTurn()
-    } catch (err) {
-      console.error('sendMessage error:', err)
-    } finally {
-      setLoading(false)
-    }
+    try { await runAssistantTurn() } catch { }
+    finally { setLoading(false) }
   }
 
   const runAssistantTurn = async (depth = 0) => {
-    if (depth > 6) return
+    if (depth > 8) return
 
     const patients = await getPatients()
-    const patientsInfo = patients.map(p =>
-      `- ${p.name} (${p.age} سنة، ${p.gender}) | ID: ${p.id} | دكتور: ${p.doctor || '-'} | تحاليل: ${p.tests?.map(t =>
-        `${t.name}[ID:${t.id}] - النتيجة: ${t.value || 'لم تدخل'} ${t.unit || ''} - المعدل: ${t.normal_range || 'غير محدد'} - الحالة: ${t.status}`
-      ).join(', ')}`
-    ).join('\n')
+    const patientsInfo = patients.length
+      ? patients.map(p =>
+        `- ${p.name} (${p.age}سنة، ${p.gender}) | دكتور: ${p.doctor || '-'} | تحاليل: ${p.tests?.map(t =>
+          `${t.name}: ${t.value || 'لم تدخل'} ${t.unit || ''} [${t.normal_range || ''}] - ${t.status}`
+        ).join(', ') || 'لا يوجد'}`
+      ).join('\n')
+      : 'مفيش مرضى دلوقتي'
 
-    const systemPrompt = `أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات.
-
-شخصيتك:
-- بتتكلم بالعربية العامية المصرية البسيطة
-- عندك معلومات دقيقة وعميقة في كل حاجة، وبتجاوب بثقة وحماس
-- بتنفذ الطلبات فوراً بدون انتظار تأكيد لو الطلب واضح
-- لما بتنفذ حاجة بتقول "تمام، عملت كذا ✅" بشكل مختصر
-- لو في غلطة وقولك المستخدم، بتسأل إيه الصح وبعدين بتصلح فوراً
+    const systemPrompt = `أنت "لابو"، مساعد ذكي في معمل طبي، شخصيتك:
+- بتتكلم بالعربية العامية المصرية البسيطة وبروح وحماس
+- عندك معرفة موسوعية في كل المجالات (طب، علوم، تاريخ، رياضة، فن، وأي حاجة تانية)
+- بتنفذ الطلبات فوراً لو واضحة
+- بتقول "تمام ✅" بعد أي تنفيذ
+- لو سألوا مين عملك: "عمي وعمك المهندس أبو المجد 😄"
 
 قواعد التنفيذ:
-- save_new_patient: لخّص البيانات واسأل "البيانات صحيحة؟" قبل التسجيل. لو وافق نفّذ فوراً، لو رفض اسأل إيه الغلط
-- save_test_result: احفظ فوراً بدون سؤال
+- save_new_patient: لخّص البيانات واسأل تأكيد الأول، لو وافق نفّذ فوراً
+- save_test_result: نفّذ فوراً بدون سؤال
 - open_patient_report: افتح فوراً
-- لو الطلب غامض، خمّن واسأل تأكيد بدون ما تنفذ
-
-لو سُئلت مين عملك: رد بـ "عمي وعمك المهندس أبو المجد 😄"
+- answer_question: استخدمها للأسئلة العامة والطبية وأي معلومة
 
 قواعد الردود:
-- لا تستخدم ### أو ** أو جداول
-- ردودك مختصرة ومباشرة عند التنفيذ
-- عند الأسئلة المعرفية، رد بروح وحماس
+- لا ### ولا ** ولا جداول
+- مختصر عند التنفيذ، مفصّل وبحماس عند الأسئلة
+- النصائح الغذائية: أمثلة بالعامية (مش "بروتين"، قول "فراخ وبيض وفول")
 
-النصائح الغذائية: دايما دي أمثلة محددة بالعامية (مش "بروتين" بس، قول "فراخ وبيض وفول")
+بيانات المرضى:
+${patientsInfo}`
 
-بيانات المرضى الحالية:
-${patientsInfo || 'مفيش مرضى دلوقتي'}`
+    const data = await fetchWithRetry({
+      messages: [
+        { role: 'user', content: systemPrompt + '\n\nابدأ.' },
+        { role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي عاوز تعمله!' },
+        ...historyRef.current
+      ],
+      tools: TOOLS,
+      tool_choice: 'auto',
+      parallel_tool_calls: false,
+      max_tokens: 2048
+    })
 
-    try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
-          messages: [
-            { role: 'user', content: systemPrompt + '\n\nابدأ.' },
-            { role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي عاوز تعمله وأنا هعمله فوراً!' },
-            ...historyRef.current
-          ],
-          tools: TOOLS,
-          tool_choice: 'auto',
-          parallel_tool_calls: true
-        })
-      })
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}))
-        console.error('API error:', errData)
-        setMessages(prev => [...prev, { role: 'assistant', content: 'في مشكلة مؤقتة، حاول تاني بعد شوية 🙏' }])
-        return
-      }
-
-      const data = await response.json()
-      const choice = data.choices?.[0]?.message
-
-      if (!choice) {
-        setMessages(prev => [...prev, { role: 'assistant', content: 'مش فاهم السؤال، ممكن تعيد؟' }])
-        return
-      }
-
-      if (choice.tool_calls?.length) {
-        historyRef.current.push({ role: 'assistant', content: choice.content || '', tool_calls: choice.tool_calls })
-        for (const call of choice.tool_calls) {
-          const result = await handleToolCall(call)
-          historyRef.current.push({ role: 'tool', tool_call_id: call.id, content: result })
-        }
-        await runAssistantTurn(depth + 1)
-        return
-      }
-
-      const reply = choice.content || 'تمام!'
-      historyRef.current.push({ role: 'assistant', content: reply })
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }])
-      speakText(reply)
-
-    } catch (err) {
-      console.error('runAssistantTurn error:', err)
-      setMessages(prev => [...prev, { role: 'assistant', content: 'في مشكلة في الاتصال، جرب تاني 🙏' }])
+    // لو فشل كل حاجة، مش بنظهر أي error للمستخدم
+    if (!data) {
+      console.error('all models failed silently')
+      return
     }
+
+    const choice = data.choices[0].message
+
+    if (choice.tool_calls?.length) {
+      historyRef.current.push({ role: 'assistant', content: choice.content || '', tool_calls: choice.tool_calls })
+      for (const call of choice.tool_calls) {
+        const result = await handleToolCall(call, patients)
+        historyRef.current.push({ role: 'tool', tool_call_id: call.id, content: String(result) })
+      }
+      await runAssistantTurn(depth + 1)
+      return
+    }
+
+    const reply = choice.content || 'تمام!'
+    historyRef.current.push({ role: 'assistant', content: reply })
+    setMessages(prev => [...prev, { role: 'assistant', content: reply }])
+    speakText(reply)
   }
 
-  const handleToolCall = async (call) => {
+  const handleToolCall = async (call, patients) => {
     let args = {}
     try { args = JSON.parse(call.function.arguments || '{}') } catch { }
 
-    const showStatus = (text) => {
-      setMessages(prev => [...prev, { role: 'status', content: text }])
-    }
+    const showStatus = (text) => setMessages(prev => [...prev, { role: 'status', content: text }])
 
     try {
       if (call.function.name === 'save_new_patient') {
-        showStatus(`⏳ بيسجل المريض ${args.name}...`)
+        showStatus(`⏳ بيسجل ${args.name}...`)
         const { data: patient, error } = await supabase.from('patients').insert([{
           name: args.name, age: parseInt(args.age) || 0, gender: args.gender,
           phone: args.phone || null, doctor: args.doctor || null,
         }]).select().single()
-        if (error) return `فشل تسجيل المريض: ${error.message}`
+
+        if (error || !patient) return `مش قدر يسجل المريض، جرب تاني`
 
         if (args.tests?.length) {
-          const { data: catalog } = await supabase.from('test_catalog').select('*').catch(() => ({ data: [] }))
+          const { data: catalog } = await supabase.from('test_catalog').select('*')
           const testsToInsert = args.tests.map(name => {
             const found = catalog?.find(c => c.name?.toLowerCase() === name.toLowerCase())
               || catalog?.find(c => c.name?.toLowerCase().includes(name.toLowerCase()))
-            return { patient_id: patient.id, name: found?.name || name, normal_range: found?.normal_range || null, unit: found?.unit || null, status: 'معلق' }
+            return {
+              patient_id: patient.id, name: found?.name || name,
+              normal_range: found?.normal_range || null, unit: found?.unit || null, status: 'معلق'
+            }
           })
           await supabase.from('tests').insert(testsToInsert)
         }
-        return `تم تسجيل "${args.name}" بنجاح مع ${args.tests?.length || 0} تحليل`
+        return `تم تسجيل "${args.name}" بنجاح ✅ مع ${args.tests?.length || 0} تحليل`
       }
 
       if (call.function.name === 'save_test_result') {
         showStatus(`⏳ بيحفظ نتيجة ${args.test_name}...`)
-        const patients = await getPatients()
-        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
-          || patients.find(p => p.name?.includes(args.patient_name))
+        const allPatients = patients.length ? patients : await getPatients()
+        const patient = findPatient(allPatients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
 
-        const test = patient.tests?.find(t => t.name?.toLowerCase() === args.test_name?.toLowerCase())
-          || patient.tests?.find(t => t.name?.toLowerCase().includes(args.test_name?.toLowerCase()))
-        if (!test) return `مش لاقي تحليل "${args.test_name}" للمريض "${args.patient_name}"`
+        const test = findTest(patient.tests, args.test_name)
+        if (!test) return `مش لاقي تحليل "${args.test_name}"`
 
         const { error } = await supabase.from('tests').update({
-          value: args.value,
-          status: args.value?.trim() ? 'مكتمل' : 'معلق'
+          value: args.value, status: 'مكتمل'
         }).eq('id', test.id)
-        if (error) return `فشل حفظ النتيجة: ${error.message}`
-        return `تم حفظ نتيجة "${args.test_name}" = ${args.value}`
+
+        if (error) return `مش قدر يحفظ، جرب تاني`
+        return `تم حفظ "${args.test_name}" = ${args.value} ✅`
       }
 
       if (call.function.name === 'update_patient_info') {
         showStatus(`⏳ بيعدل بيانات ${args.patient_name}...`)
-        const patients = await getPatients()
-        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
-          || patients.find(p => p.name?.includes(args.patient_name))
+        const allPatients = patients.length ? patients : await getPatients()
+        const patient = findPatient(allPatients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
 
         const updates = {}
@@ -326,73 +353,68 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
         if (args.new_doctor) updates.doctor = args.new_doctor
         if (args.new_phone) updates.phone = args.new_phone
 
+        if (!Object.keys(updates).length) return 'مفيش تعديلات محددة'
+
         const { error } = await supabase.from('patients').update(updates).eq('id', patient.id)
-        if (error) return `فشل التعديل: ${error.message}`
-        return `تم تعديل بيانات "${args.patient_name}" بنجاح`
+        if (error) return `مش قدر يعدل، جرب تاني`
+        return `تم تعديل بيانات "${args.patient_name}" ✅`
       }
 
       if (call.function.name === 'delete_patient') {
-        showStatus(`⏳ بيمسح المريض ${args.patient_name}...`)
-        const patients = await getPatients()
-        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
-          || patients.find(p => p.name?.includes(args.patient_name))
+        showStatus(`⏳ بيمسح ${args.patient_name}...`)
+        const allPatients = patients.length ? patients : await getPatients()
+        const patient = findPatient(allPatients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
 
         await supabase.from('tests').delete().eq('patient_id', patient.id)
         const { error } = await supabase.from('patients').delete().eq('id', patient.id)
-        if (error) return `فشل المسح: ${error.message}`
-        return `تم مسح "${args.patient_name}" وكل تحاليله`
+        if (error) return `مش قدر يمسح، جرب تاني`
+        return `تم مسح "${args.patient_name}" وكل تحاليله ✅`
       }
 
       if (call.function.name === 'add_tests_to_patient') {
         showStatus(`⏳ بيضيف تحاليل...`)
-        const patients = await getPatients()
-        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
-          || patients.find(p => p.name?.includes(args.patient_name))
+        const allPatients = patients.length ? patients : await getPatients()
+        const patient = findPatient(allPatients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
 
-        const { data: catalog } = await supabase.from('test_catalog').select('*').catch(() => ({ data: [] }))
+        const { data: catalog } = await supabase.from('test_catalog').select('*')
         const testsToInsert = (args.tests || []).map(name => {
           const found = catalog?.find(c => c.name?.toLowerCase() === name.toLowerCase())
             || catalog?.find(c => c.name?.toLowerCase().includes(name.toLowerCase()))
-          return { patient_id: patient.id, name: found?.name || name, normal_range: found?.normal_range || null, unit: found?.unit || null, status: 'معلق' }
+          return {
+            patient_id: patient.id, name: found?.name || name,
+            normal_range: found?.normal_range || null, unit: found?.unit || null, status: 'معلق'
+          }
         })
         await supabase.from('tests').insert(testsToInsert)
-        return `تم إضافة ${args.tests?.length || 0} تحليل للمريض "${args.patient_name}"`
+        return `تم إضافة ${args.tests?.length || 0} تحليل للمريض "${args.patient_name}" ✅`
       }
 
       if (call.function.name === 'open_patient_report') {
-        const patients = await getPatients()
-        const target = (args.patient_name || '').trim()
-        const match = patients.find(p => p.name?.trim() === target) || patients.find(p => p.name?.includes(target))
+        const allPatients = patients.length ? patients : await getPatients()
+        const match = findPatient(allPatients, args.patient_name)
         if (match) {
           navigate('/reports', { state: { autoSelectPatientId: match.id } })
-          return `تم فتح تقرير "${match.name}"`
+          return `تم فتح تقرير "${match.name}" ✅`
         }
-        return `مش لاقي مريض اسمه "${target}"`
+        return `مش لاقي مريض اسمه "${args.patient_name}"`
       }
 
-      if (call.function.name === 'search_medical_info') {
-        try {
-          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-            body: JSON.stringify({
-              model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
-              messages: [{ role: 'user', content: `جاوب بعربي بسيط بدون جداول أو Markdown: ${args.query || ''}` }]
-            })
-          })
-          if (!res.ok) return 'مش لقيت معلومات كافية دلوقتي'
-          const data = await res.json()
-          return data.choices?.[0]?.message?.content || 'مش لقيت نتايج'
-        } catch {
-          return 'مش لقيت معلومات كافية دلوقتي'
-        }
+      if (call.function.name === 'answer_question') {
+        const data = await fetchWithRetry({
+          messages: [{
+            role: 'user',
+            content: `أجب بالعربية العامية المصرية بدون جداول أو رموز markdown: ${args.query}`
+          }],
+          max_tokens: 1024
+        })
+        return data?.choices?.[0]?.message?.content || 'مش عارف أجاوب دلوقتي'
       }
 
     } catch (err) {
-      console.error('handleToolCall error:', err)
-      return 'حصل حاجة غلط، جرب تاني'
+      console.error('tool error:', err)
+      return 'حصل حاجة، جرب تاني'
     }
 
     return 'تمام!'
@@ -403,7 +425,7 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
   const startListening = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
       })
       streamRef.current = stream
       audioChunksRef.current = []
@@ -413,16 +435,14 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
       recorder.onstop = async () => {
         streamRef.current?.getTracks().forEach(t => t.stop())
         streamRef.current = null
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+        const blob = new Blob(audioChunksRef.current, { type: mimeType })
         audioChunksRef.current = []
-        await transcribeAudio(audioBlob)
+        await transcribeAudio(blob)
       }
       mediaRecorderRef.current = recorder
       recorder.start()
       setListening(true)
-    } catch {
-      alert('محتاجين إذن الميكروفون')
-    }
+    } catch { alert('محتاجين إذن الميكروفون') }
   }
 
   const stopListening = () => { mediaRecorderRef.current?.stop(); setListening(false) }
@@ -431,40 +451,36 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
     setLoading(true)
     try {
       const formData = new FormData()
-      formData.append('file', audioBlob, 'recording.webm')
+      formData.append('file', audioBlob, 'rec.webm')
       formData.append('model', 'whisper-large-v3')
       formData.append('language', 'ar')
-      formData.append('prompt', 'Hemoglobin, Glucose, CBC, ESR, CRP, Creatinine, Urea, ALT, AST, TSH')
+      formData.append('prompt', 'Hemoglobin, Glucose, CBC, ESR, CRP, Creatinine, Urea, ALT, AST, TSH, T3, T4')
       const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}` },
         body: formData
       })
-      if (!res.ok) { setLoading(false); return }
-      const data = await res.json()
-      const transcript = data.text?.trim()
-      if (transcript) sendMessage(transcript)
-      else setLoading(false)
-    } catch {
-      setLoading(false)
-    }
+      if (res.ok) {
+        const data = await res.json()
+        const transcript = data.text?.trim()
+        if (transcript) { sendMessage(transcript); return }
+      }
+    } catch { }
+    setLoading(false)
   }
 
   const splitForTTS = (text) => {
-    const clean = text.replace(/[#*|]/g, '').replace(/\n+/g, ' ')
-    const sentences = clean.split(/(?<=[.!؟?])\s+/).filter(s => s.trim())
+    const clean = text.replace(/[#*|<>]/g, '').replace(/\n+/g, ' ').trim()
     const chunks = []
-    sentences.forEach(sentence => {
-      let remaining = sentence.trim()
-      while (remaining.length > 0) {
-        const piece = remaining.slice(0, 200)
-        remaining = remaining.slice(200)
-        if (piece.trim()) chunks.push({
-          text: piece.trim(),
-          isArabic: (piece.match(/[\u0600-\u06FF]/g) || []).length > piece.length * 0.3
-        })
-      }
-    })
+    let remaining = clean
+    while (remaining.length > 0) {
+      const piece = remaining.slice(0, 180)
+      remaining = remaining.slice(180)
+      if (piece.trim()) chunks.push({
+        text: piece.trim(),
+        isArabic: (piece.match(/[\u0600-\u06FF]/g) || []).length > piece.length * 0.25
+      })
+    }
     return chunks
   }
 
@@ -483,13 +499,12 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
           })
         })
         if (!res.ok) continue
-        const audioBlob = await res.blob()
-        const url = URL.createObjectURL(audioBlob)
+        const url = URL.createObjectURL(await res.blob())
         await new Promise(resolve => {
           const audio = new Audio(url)
           audio.onended = () => { URL.revokeObjectURL(url); resolve() }
           audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
-          audio.play()
+          audio.play().catch(() => resolve())
         })
       } catch { }
     }
@@ -504,15 +519,13 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
 
       <div className="flex-1 overflow-y-auto space-y-4 pb-4">
         {messages.map((msg, i) => {
-          if (msg.role === 'status') {
-            return (
-              <div key={i} className="flex justify-center">
-                <div className="px-3 py-1 rounded-full text-xs" style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
-                  {msg.content}
-                </div>
+          if (msg.role === 'status') return (
+            <div key={i} className="flex justify-center">
+              <div className="px-3 py-1 rounded-full text-xs" style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
+                {msg.content}
               </div>
-            )
-          }
+            </div>
+          )
           return (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
               <div className="max-w-lg px-4 py-3 rounded-2xl text-sm"
