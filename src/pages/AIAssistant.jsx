@@ -122,7 +122,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'answer_question',
-      description: 'يجاوب على أي سؤال طبي أو عام.',
+      description: 'يجاوب على أي سؤال طبي أو عام أو معلوماتي.',
       parameters: {
         type: 'object',
         properties: { query: { type: 'string' } },
@@ -133,7 +133,6 @@ const TOOLS = [
 ]
 
 const fetchWithRetry = async (body) => {
-  // جرب كل الموديلات مع tools
   for (const model of MODELS) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -150,8 +149,7 @@ const fetchWithRetry = async (body) => {
       await new Promise(r => setTimeout(r, 800))
     }
   }
-
-  // last resort: جرب من غير tools
+  // last resort بدون tools
   for (const model of MODELS) {
     try {
       const { tools, tool_choice, parallel_tool_calls, ...rest } = body
@@ -166,9 +164,16 @@ const fetchWithRetry = async (body) => {
       }
     } catch { }
   }
-
   return null
 }
+
+// أزرار الاختصارات السريعة
+const QUICK_ACTIONS = [
+  { label: '➕ مريض جديد', text: 'عاوز أسجل مريض جديد' },
+  { label: '🔬 إيه التحاليل المتاحة؟', text: 'إيه التحاليل المتاحة في المعمل؟' },
+  { label: '📋 المرضى الحاليين', text: 'إيه المرضى اللي عندي دلوقتي؟' },
+  { label: '📄 طباعة تقرير', text: 'عاوز أطبع تقرير مريض' },
+]
 
 export default function AIAssistant() {
   const navigate = useNavigate()
@@ -176,10 +181,12 @@ export default function AIAssistant() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [listening, setListening] = useState(false)
+  const [showQuickActions, setShowQuickActions] = useState(true)
   const messagesEndRef = useRef(null)
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
+  const inputRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -192,6 +199,13 @@ export default function AIAssistant() {
   const getPatients = async () => {
     try {
       const { data } = await supabase.from('patients').select('*, tests(*)')
+      return data || []
+    } catch { return [] }
+  }
+
+  const getCatalog = async () => {
+    try {
+      const { data } = await supabase.from('test_catalog').select('*')
       return data || []
     } catch { return [] }
   }
@@ -212,9 +226,16 @@ export default function AIAssistant() {
       || tests?.find(t => n.includes(t.name?.toLowerCase()))
   }
 
+  const clearChat = () => {
+    setMessages([{ role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي عاوز تعمله!' }])
+    historyRef.current = []
+    setShowQuickActions(true)
+  }
+
   const sendMessage = async (text) => {
     const trimmed = text.trim()
     if (!trimmed || loading) return
+    setShowQuickActions(false)
     setMessages(prev => [...prev, { role: 'user', content: trimmed }])
     setInput('')
     setLoading(true)
@@ -226,7 +247,22 @@ export default function AIAssistant() {
   const runAssistantTurn = async (depth = 0) => {
     if (depth > 8) return
 
-    const patients = await getPatients()
+    const [patients, catalog] = await Promise.all([getPatients(), getCatalog()])
+
+    // تجميع الكاتالوج بالكاتيجوري
+    let catalogInfo = ''
+    if (catalog.length) {
+      const grouped = {}
+      catalog.forEach(t => {
+        const cat = t.category || 'عام'
+        if (!grouped[cat]) grouped[cat] = []
+        grouped[cat].push(t.name)
+      })
+      catalogInfo = Object.entries(grouped)
+        .map(([cat, tests]) => `${cat}: ${tests.join('، ')}`)
+        .join('\n')
+    }
+
     const patientsInfo = patients.length
       ? patients.map(p =>
         `- ${p.name} (${p.age}سنة، ${p.gender}) | دكتور: ${p.doctor || '-'} | تحاليل: ${p.tests?.map(t =>
@@ -237,27 +273,35 @@ export default function AIAssistant() {
 
     const systemPrompt = `أنت "لابو"، مساعد ذكي في معمل طبي، شخصيتك:
 - بتتكلم بالعربية العامية المصرية البسيطة وبروح وحماس
-- عندك معرفة موسوعية في كل المجالات (طب، علوم، تاريخ، رياضة، فن، وأي حاجة تانية)
+- عندك معرفة موسوعية في كل المجالات
 - بتنفذ الطلبات فوراً لو واضحة
-- بتقول "تمام ✅" بعد أي تنفيذ
+- بتقول "تمام ✅" بعد أي تنفيذ ناجح مع وصف قصير لما عملته
 - لو سألوا مين عملك: "عمي وعمك المهندس أبو المجد 😄"
 
 قواعد التنفيذ:
-- save_new_patient: استخرج كل البيانات الممكنة من كلام المستخدم دفعة واحدة. لو ناقص بيانات مهمة (الاسم أو السن أو الجنس)، اسأل عنهم كلهم في سؤال واحد مش سؤال سؤال. مثلاً: "تمام، محتاج اسم المريض، سنه، وجنسه في رسالة واحدة". لو عندك كل البيانات، لخّصها واسأل تأكيد واحد فقط.
-- لو المستخدم قال "ذكر" أو "أنثى" أو "واحد" أو "واحدة" أو "بنت" أو "ولد" أو "راجل" أو "ست"، افهمها كجنس تلقائياً بدون سؤال.
+- save_new_patient: استخرج كل البيانات من رسالة المستخدم دفعة واحدة. لو ناقص بيانات (اسم أو سن أو جنس) اسأل عنهم كلهم في سؤال واحد. لو عندك كل البيانات، لخّصها واسأل تأكيد واحد فقط ثم نفّذ فوراً.
+- لو المستخدم قال "ذكر/أنثى/واحد/واحدة/بنت/ولد/راجل/ست" افهمها كجنس تلقائياً بدون سؤال.
 - save_test_result: نفّذ فوراً بدون سؤال
 - open_patient_report: افتح فوراً
-- answer_question: استخدمها للأسئلة العامة والطبية فقط
-- لو الطلب غير واضح أو مش فاهمه: لا تستخدم أي tool، فكّر في أقرب أمر ممكن من (تسجيل مريض، حفظ نتيجة، تعديل بيانات، مسح مريض، إضافة تحاليل، فتح تقرير) واسأل المستخدم مباشرة: "هل تقصد إني أعملك [الأمر المقترح]؟" لو قال آه نفّذ، لو قال لا قوله "طب قولي إيه اللي عاوز تعمله بالظبط؟"
-- لا تقول "تمام" لوحدها أبداً كرد نهائي من غير ما تكون نفّذت حاجة فعلية أو أجبت على سؤال حقيقي
+- answer_question: استخدمها للأسئلة العامة والطبية والمعلوماتية
+- لو الطلب غير واضح: فكّر في أقرب أمر من (تسجيل مريض، حفظ نتيجة، تعديل بيانات، مسح مريض، إضافة تحاليل، فتح تقرير) واسأل "هل تقصد إني أعملك [الأمر]؟" لو قال آه نفّذ، لو قال لا قوله "طب قولي إيه اللي عاوز تعمله بالظبط؟"
+- لا تقول "تمام" وحدها أبداً كرد نهائي بدون تنفيذ أو إجابة حقيقية
 
+قواعد التحاليل (مهم جداً):
+- لو حد طلب تحليل أو مجموعة تحاليل، دوّر في الكاتالوج المتاح واقترح الأقرب
+- لو حد قال "تحاليل دم" أو "CBC" أو كلام عام، اعرض التحاليل المتاحة في نفس الفئة واسأله إيه اللي يحتاجه
+- لو التحليل مش موجود في الكاتالوج، قوله "التحليل ده مش متاح دلوقتي" واقترح الأقرب
+- لو سأل "إيه التحاليل المتاحة؟" اعرض الكاتالوج كامل مرتب بالفئات
 
 قواعد الردود:
 - لا ### ولا ** ولا جداول
 - مختصر عند التنفيذ، مفصّل وبحماس عند الأسئلة
 - النصائح الغذائية: أمثلة بالعامية (مش "بروتين"، قول "فراخ وبيض وفول")
 
-بيانات المرضى:
+التحاليل المتاحة في المعمل:
+${catalogInfo || 'لم يتم إضافة تحاليل للكاتالوج بعد'}
+
+بيانات المرضى الحاليين:
 ${patientsInfo}`
 
     const data = await fetchWithRetry({
@@ -272,7 +316,6 @@ ${patientsInfo}`
       max_tokens: 2048
     })
 
-    // لو فشل كل حاجة، مش بنظهر أي error للمستخدم
     if (!data) {
       console.error('all models failed silently')
       return
@@ -283,7 +326,7 @@ ${patientsInfo}`
     if (choice.tool_calls?.length) {
       historyRef.current.push({ role: 'assistant', content: choice.content || '', tool_calls: choice.tool_calls })
       for (const call of choice.tool_calls) {
-        const result = await handleToolCall(call, patients)
+        const result = await handleToolCall(call, patients, catalog)
         historyRef.current.push({ role: 'tool', tool_call_id: call.id, content: String(result) })
       }
       await runAssistantTurn(depth + 1)
@@ -296,10 +339,9 @@ ${patientsInfo}`
     speakText(reply)
   }
 
-  const handleToolCall = async (call, patients) => {
+  const handleToolCall = async (call, patients, catalog) => {
     let args = {}
     try { args = JSON.parse(call.function.arguments || '{}') } catch { }
-
     const showStatus = (text) => setMessages(prev => [...prev, { role: 'status', content: text }])
 
     try {
@@ -309,11 +351,9 @@ ${patientsInfo}`
           name: args.name, age: parseInt(args.age) || 0, gender: args.gender,
           phone: args.phone || null, doctor: args.doctor || null,
         }]).select().single()
-
         if (error || !patient) return `مش قدر يسجل المريض، جرب تاني`
 
         if (args.tests?.length) {
-          const { data: catalog } = await supabase.from('test_catalog').select('*')
           const testsToInsert = args.tests.map(name => {
             const found = catalog?.find(c => c.name?.toLowerCase() === name.toLowerCase())
               || catalog?.find(c => c.name?.toLowerCase().includes(name.toLowerCase()))
@@ -332,14 +372,9 @@ ${patientsInfo}`
         const allPatients = patients.length ? patients : await getPatients()
         const patient = findPatient(allPatients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
-
         const test = findTest(patient.tests, args.test_name)
         if (!test) return `مش لاقي تحليل "${args.test_name}"`
-
-        const { error } = await supabase.from('tests').update({
-          value: args.value, status: 'مكتمل'
-        }).eq('id', test.id)
-
+        const { error } = await supabase.from('tests').update({ value: args.value, status: 'مكتمل' }).eq('id', test.id)
         if (error) return `مش قدر يحفظ، جرب تاني`
         return `تم حفظ "${args.test_name}" = ${args.value} ✅`
       }
@@ -349,16 +384,13 @@ ${patientsInfo}`
         const allPatients = patients.length ? patients : await getPatients()
         const patient = findPatient(allPatients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
-
         const updates = {}
         if (args.new_name) updates.name = args.new_name
         if (args.new_age) updates.age = parseInt(args.new_age)
         if (args.new_gender) updates.gender = args.new_gender
         if (args.new_doctor) updates.doctor = args.new_doctor
         if (args.new_phone) updates.phone = args.new_phone
-
         if (!Object.keys(updates).length) return 'مفيش تعديلات محددة'
-
         const { error } = await supabase.from('patients').update(updates).eq('id', patient.id)
         if (error) return `مش قدر يعدل، جرب تاني`
         return `تم تعديل بيانات "${args.patient_name}" ✅`
@@ -369,7 +401,6 @@ ${patientsInfo}`
         const allPatients = patients.length ? patients : await getPatients()
         const patient = findPatient(allPatients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
-
         await supabase.from('tests').delete().eq('patient_id', patient.id)
         const { error } = await supabase.from('patients').delete().eq('id', patient.id)
         if (error) return `مش قدر يمسح، جرب تاني`
@@ -381,8 +412,6 @@ ${patientsInfo}`
         const allPatients = patients.length ? patients : await getPatients()
         const patient = findPatient(allPatients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
-
-        const { data: catalog } = await supabase.from('test_catalog').select('*')
         const testsToInsert = (args.tests || []).map(name => {
           const found = catalog?.find(c => c.name?.toLowerCase() === name.toLowerCase())
             || catalog?.find(c => c.name?.toLowerCase().includes(name.toLowerCase()))
@@ -407,10 +436,7 @@ ${patientsInfo}`
 
       if (call.function.name === 'answer_question') {
         const data = await fetchWithRetry({
-          messages: [{
-            role: 'user',
-            content: `أجب بالعربية العامية المصرية بدون جداول أو رموز markdown: ${args.query}`
-          }],
+          messages: [{ role: 'user', content: `أجب بالعربية العامية المصرية بدون جداول أو رموز markdown: ${args.query}` }],
           max_tokens: 1024
         })
         return data?.choices?.[0]?.message?.content || 'مش عارف أجاوب دلوقتي'
@@ -420,7 +446,6 @@ ${patientsInfo}`
       console.error('tool error:', err)
       return 'حصل حاجة، جرب تاني'
     }
-
     return 'تمام!'
   }
 
@@ -516,11 +541,21 @@ ${patientsInfo}`
 
   return (
     <div className="flex flex-col p-6 pb-0" style={{ height: 'calc(100vh - 65px)' }} dir="rtl">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>المساعد الذكي</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>تحدث أو اكتب لمساعدك الذكي "لابو"</p>
+
+      {/* Header */}
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>المساعد الذكي</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>تحدث أو اكتب لمساعدك الذكي "لابو"</p>
+        </div>
+        <button onClick={clearChat}
+          className="text-xs px-3 py-1.5 rounded-lg"
+          style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)', border: '1px solid var(--outline-variant)' }}>
+          🗑️ مسح المحادثة
+        </button>
       </div>
 
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-4 pb-4">
         {messages.map((msg, i) => {
           if (msg.role === 'status') return (
@@ -532,6 +567,12 @@ ${patientsInfo}`
           )
           return (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+              {msg.role === 'assistant' && (
+                <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm flex-shrink-0 ml-2 mt-1"
+                  style={{ background: 'var(--primary-container)', color: 'white' }}>
+                  🤖
+                </div>
+              )}
               <div className="max-w-lg px-4 py-3 rounded-2xl text-sm"
                 style={{
                   background: msg.role === 'user' ? 'var(--primary-container)' : 'white',
@@ -548,19 +589,47 @@ ${patientsInfo}`
           )
         })}
 
+        {/* Loading */}
         {loading && (
-          <div className="flex justify-end">
-            <div className="px-4 py-3 rounded-2xl text-sm bg-white" style={{ border: '1px solid var(--outline-variant)' }}>
-              <span className="animate-pulse">لابو شغال...</span>
+          <div className="flex justify-end items-center gap-2">
+            <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm flex-shrink-0"
+              style={{ background: 'var(--primary-container)', color: 'white' }}>
+              🤖
+            </div>
+            <div className="px-4 py-3 rounded-2xl text-sm bg-white flex items-center gap-1"
+              style={{ border: '1px solid var(--outline-variant)' }}>
+              <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--primary-container)', animationDelay: '0ms' }}></span>
+              <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--primary-container)', animationDelay: '150ms' }}></span>
+              <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--primary-container)', animationDelay: '300ms' }}></span>
             </div>
           </div>
         )}
+
+        {/* Quick Actions - بتظهر بس في أول المحادثة */}
+        {showQuickActions && messages.length <= 1 && (
+          <div className="space-y-2 mt-4">
+            <p className="text-xs text-center" style={{ color: 'var(--on-surface-variant)' }}>اختصارات سريعة</p>
+            <div className="grid grid-cols-2 gap-2">
+              {QUICK_ACTIONS.map((action, i) => (
+                <button key={i} onClick={() => sendMessage(action.text)}
+                  className="text-sm px-3 py-2 rounded-xl text-right transition-all"
+                  style={{ background: 'white', border: '1px solid var(--outline-variant)', color: 'var(--on-surface)' }}
+                  onMouseEnter={e => e.target.style.borderColor = 'var(--primary-container)'}
+                  onMouseLeave={e => e.target.style.borderColor = 'var(--outline-variant)'}>
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Input */}
       <div className="py-4 flex gap-3" style={{ borderTop: '1px solid var(--outline-variant)' }}>
         <button onClick={toggleListening}
-          className="w-12 h-12 rounded-xl flex items-center justify-center text-xl"
+          className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
           style={{
             background: listening ? '#fee2e2' : '#f1f3f4',
             border: listening ? '2px solid #ef4444' : '1px solid var(--outline-variant)'
@@ -568,19 +637,20 @@ ${patientsInfo}`
           {listening ? '🔴' : '🎤'}
         </button>
 
-        <input type="text" value={input}
+        <input ref={inputRef} type="text" value={input}
           onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && sendMessage(input)}
+          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage(input)}
           placeholder="اكتب سؤالك أو أمرك هنا..."
           className="flex-1 px-4 py-3 rounded-xl outline-none text-right"
           style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
           onFocus={e => e.target.style.border = '2px solid var(--primary-container)'}
           onBlur={e => e.target.style.border = '1px solid var(--outline-variant)'}
+          disabled={loading}
         />
 
-        <button onClick={() => sendMessage(input)}
-          className="w-12 h-12 rounded-xl flex items-center justify-center text-white"
-          style={{ background: 'var(--primary-container)' }}>
+        <button onClick={() => sendMessage(input)} disabled={loading || !input.trim()}
+          className="w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0"
+          style={{ background: loading || !input.trim() ? '#94a3b8' : 'var(--primary-container)' }}>
           ➤
         </button>
       </div>
