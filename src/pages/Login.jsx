@@ -49,10 +49,10 @@ export default function Login() {
 
           <div className="space-y-4">
             {[
-              { icon: '🔬', text: 'إدارة نتائج التحاليل بكل سهولة' },
-              { icon: '📋', text: 'تقارير فورية ومفصلة' },
-              { icon: '🔒', text: 'بيانات آمنة ومشفرة' },
-              { icon: '⚡', text: 'أداء سريع وموثوق' },
+              { icon: '🔬', text: 'تسجيل المرضى وإدارة نتائج التحاليل بكل سهولة' },
+              { icon: '🤖', text: '"لابو" مساعدك الذكي يسجل ويرد على استفساراتك' },
+              { icon: '🖨️', text: 'طباعة تقريراحترافي بنتيجة التحليل بضغطة واحدة' },
+              { icon: '🔒', text: 'بياناتك محفوظة وآمنة على قاعدة بيانات مشفرة' },
             ].map((f, i) => (
               <div key={i} className="flex items-center gap-3 px-5 py-3 rounded-2xl text-right"
                 style={{ background: 'rgba(255,255,255,0.12)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.18)' }}>
