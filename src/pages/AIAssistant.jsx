@@ -233,7 +233,7 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
         model: 'openai/gpt-oss-120b',
         messages: [
           { role: 'user', content: systemPrompt + '\n\nابدأ.' },
-          { role: 'assistant', content: 'أهلاً! أنا لابو، جاهز أنفذ أي طلب فوراً 😊' },
+         { role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي عاوز تعمله وأنا هعمله فوراً!' },
           ...historyRef.current
         ],
         tools: TOOLS,
