@@ -10,11 +10,35 @@ const resultColor = {
   'معلق': { color: '#92400e', bg: '#fef3c7' },
 }
 
+const periodFilters = [
+  { key: 'all', label: 'الكل' },
+  { key: 'today', label: 'اليوم' },
+  { key: 'yesterday', label: 'الامس' },
+  { key: 'week', label: 'آخر أسبوع' },
+  { key: 'month', label: 'آخر شهر' },
+  { key: 'older', label: 'قبل ذلك' },
+]
+
+const getBucket = (dateStr) => {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfYesterday = new Date(startOfToday); startOfYesterday.setDate(startOfYesterday.getDate() - 1)
+  const startOfWeek = new Date(startOfToday); startOfWeek.setDate(startOfWeek.getDate() - 7)
+  const startOfMonth = new Date(startOfToday); startOfMonth.setDate(startOfMonth.getDate() - 30)
+  if (date >= startOfToday) return 'today'
+  if (date >= startOfYesterday) return 'yesterday'
+  if (date >= startOfWeek) return 'week'
+  if (date >= startOfMonth) return 'month'
+  return 'older'
+}
+
 export default function Reports() {
   const location = useLocation()
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [periodFilter, setPeriodFilter] = useState('all')
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [settings, setSettings] = useState(null)
   const [design, setDesign] = useState({
@@ -32,7 +56,6 @@ export default function Reports() {
 
   useEffect(() => { fetchPatients(); fetchSettings() }, [])
 
-  // لو المساعد الذكي وجّهنا هنا بمريض معين (لطباعة تقريره)، نحدده تلقائيًا أول ما المرضى تتحمل
   useEffect(() => {
     const targetId = location.state?.autoSelectPatientId
     if (!loading && targetId && patients.length) {
@@ -77,7 +100,9 @@ export default function Reports() {
     setTimeout(() => setDesignSaved(false), 2000)
   }
 
-  const filtered = patients.filter(p => p.name?.includes(search))
+  const filtered = patients
+    .filter(p => periodFilter === 'all' || getBucket(p.created_at) === periodFilter)
+    .filter(p => p.name?.includes(search))
 
   const fs = parseInt(design.report_font_size) || 11
 
@@ -91,18 +116,13 @@ export default function Reports() {
     return groups
   }
 
-  // تحسب حالة النتيجة (مرتفع / منخفض / طبيعي) تلقائيًا بمقارنة الرقم بالمعدل الطبيعي
-  // مثال: value = 130, range = "50-115" => 130 أعلى من 115 => 'مرتفع'
   const calcResultStatus = (value, range) => {
     const num = parseFloat(String(value).replace(',', '.'))
     if (isNaN(num) || !range) return null
-
     const matches = String(range).match(/-?\d+(\.\d+)?/g)
     if (!matches || matches.length < 2) return null
-
     const nums = matches.map(parseFloat).sort((a, b) => a - b)
     const [low, high] = nums
-
     if (num > high) return 'مرتفع'
     if (num < low) return 'منخفض'
     return 'طبيعي'
@@ -157,7 +177,7 @@ export default function Reports() {
     return (
       <div style={{ fontFamily: 'Arial, sans-serif', fontSize: `${fs}px`, color: '#000', background: 'white', padding: '20px 25px' }}>
 
-        {/* Header - فاضي عمدًا (يُطبع على ورقة هيدر جاهزة) */}
+        {/* Header فاضي للطباعة على ورق هيدر */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', gap: '8mm', marginBottom: '6mm' }}>
           <div style={{ height: '90px' }}></div>
           <div style={{ height: '90px' }}></div>
@@ -171,7 +191,7 @@ export default function Reports() {
           Laboratory Report
         </div>
 
-        {/* Patient Info - بدون barcode */}
+        {/* Patient Info */}
         <div style={{ marginBottom: '12px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px 30px' }}>
             {[
@@ -217,16 +237,16 @@ export default function Reports() {
                 {tests.map((t, ti) => {
                   const computedStatus = calcResultStatus(t.value, t.normal_range) || t.status
                   return (
-                  <tr key={ti} style={{ background: ti % 2 === 0 ? 'white' : '#fafafa' }}>
-                    <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>■ {t.name}</td>
-                    <td style={{
-                      padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee',
-                      color: computedStatus === 'مرتفع' ? rHigh : computedStatus === 'منخفض' ? rLow : rNormal,
-                      fontWeight: (computedStatus === 'مرتفع' || computedStatus === 'منخفض') ? 'bold' : 'normal'
-                    }}>{t.value || '---'}</td>
-                    <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.unit || ''}</td>
-                    <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.normal_range || '---'}</td>
-                  </tr>
+                    <tr key={ti} style={{ background: ti % 2 === 0 ? 'white' : '#fafafa' }}>
+                      <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>■ {t.name}</td>
+                      <td style={{
+                        padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee',
+                        color: computedStatus === 'مرتفع' ? rHigh : computedStatus === 'منخفض' ? rLow : rNormal,
+                        fontWeight: (computedStatus === 'مرتفع' || computedStatus === 'منخفض') ? 'bold' : 'normal'
+                      }}>{t.value || '---'}</td>
+                      <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.unit || ''}</td>
+                      <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.normal_range || '---'}</td>
+                    </tr>
                   )
                 })}
               </Fragment>
@@ -244,7 +264,6 @@ export default function Reports() {
             <div style={{ width: '160px', borderBottom: `1px solid ${hc}`, margin: '0 auto' }}></div>
           </div>
         </div>
-
       </div>
     )
   }
@@ -258,6 +277,23 @@ export default function Reports() {
 
       {!selectedPatient ? (
         <>
+          {/* فلتر الفترة الزمنية */}
+          <div className="flex gap-2 mb-4 flex-wrap">
+            {periodFilters.map(f => (
+              <button key={f.key} onClick={() => setPeriodFilter(f.key)}
+                className="px-3 py-1 rounded-full text-xs font-medium transition-all"
+                style={{
+                  background: periodFilter === f.key ? 'var(--primary-container)' : '#f1f3f4',
+                  color: periodFilter === f.key ? 'white' : 'var(--on-surface-variant)'
+                }}>
+                {f.label}
+              </button>
+            ))}
+            <span className="text-xs self-center mr-1" style={{ color: 'var(--on-surface-variant)' }}>
+              {filtered.length} نتيجة
+            </span>
+          </div>
+
           <input type="text" placeholder="ابحث عن مريض..." value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full px-4 py-2 rounded-lg outline-none text-right mb-4"
@@ -268,6 +304,10 @@ export default function Reports() {
 
           {loading ? (
             <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>جاري التحميل...</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-10 text-sm" style={{ color: 'var(--on-surface-variant)' }}>
+              لا يوجد مرضى مطابقين
+            </div>
           ) : (
             <div className="space-y-4">
               {filtered.map(patient => (
