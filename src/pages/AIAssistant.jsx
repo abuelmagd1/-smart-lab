@@ -324,10 +324,9 @@ ${patientsInfo}`
     const systemPrompt = buildSystemPrompt(patients, catalog)
 
     const data = await fetchWithRetry({
-      // system كـ role منفصل مش جزء من messages ──
-      system: systemPrompt,
       messages: [
-        // أول رسالة ثابتة للتعريف
+        // system كـ أول message بالـ role الصح اللي Groq بيدعمه
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: 'ابدأ.' },
         { role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي عاوز تعمله!' },
         ...historyRef.current
@@ -687,3 +686,4 @@ ${patientsInfo}`
     </div>
   )
 }
+
