@@ -169,7 +169,7 @@ const fetchWithRetry = async (body) => {
 
 // أزرار الاختصارات السريعة
 const QUICK_ACTIONS = [
-  { label: '➕ مريض جديد', text: 'عاوز أسجل مريض جديد' },
+  { label: '➕ مريض جديد', navigate: '/new-patient' },
   { label: '🔬 إيه التحاليل المتاحة؟', text: 'إيه التحاليل المتاحة في المعمل؟' },
   { label: '📋 المرضى الحاليين', text: 'إيه المرضى اللي عندي دلوقتي؟' },
   { label: '📄 طباعة تقرير', text: 'عاوز أطبع تقرير مريض' },
@@ -640,7 +640,7 @@ ${patientsInfo}`
             <p className="text-xs text-center" style={{ color: 'var(--on-surface-variant)' }}>اختصارات سريعة</p>
             <div className="grid grid-cols-2 gap-2">
               {QUICK_ACTIONS.map((action, i) => (
-                <button key={i} onClick={() => sendMessage(action.text)}
+                <button key={i} onClick={() => action.navigate ? navigate(action.navigate) : sendMessage(action.text)}
                   className="text-sm px-3 py-2 rounded-xl text-right transition-all"
                   style={{ background: 'white', border: '1px solid var(--outline-variant)', color: 'var(--on-surface)' }}
                   onMouseEnter={e => e.target.style.borderColor = 'var(--primary-container)'}
@@ -686,4 +686,3 @@ ${patientsInfo}`
     </div>
   )
 }
-
