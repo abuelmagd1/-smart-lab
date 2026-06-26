@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
 
@@ -9,6 +9,8 @@ const MODELS = [
   'llama3-70b-8192',
   'mixtral-8x7b-32768',
 ]
+
+const MAX_HISTORY = 20 // آخر 20 رسالة بس
 
 const renderMarkdown = (text) => {
   if (!text) return ''
@@ -132,22 +134,20 @@ const TOOLS = [
   }
 ]
 
+// ── Fetch مع retry أسرع: مرة واحدة لكل موديل بدون تأخير زيادة ──
 const fetchWithRetry = async (body) => {
   for (const model of MODELS) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-          body: JSON.stringify({ ...body, model })
-        })
-        if (res.ok) {
-          const data = await res.json()
-          if (data.choices?.[0]?.message) return data
-        }
-      } catch { }
-      await new Promise(r => setTimeout(r, 800))
-    }
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ ...body, model })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.choices?.[0]?.message) return data
+      }
+    } catch { }
   }
   // last resort بدون tools
   for (const model of MODELS) {
@@ -188,6 +188,10 @@ export default function AIAssistant() {
   const streamRef = useRef(null)
   const inputRef = useRef(null)
 
+  // ── Cache المرضى والكاتالوج في ref عشان ما نعملش fetch في كل turn ──
+  const cacheRef = useRef({ patients: null, catalog: null, lastFetch: 0 })
+  const CACHE_TTL = 30_000 // 30 ثانية
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
@@ -196,19 +200,19 @@ export default function AIAssistant() {
     return () => { streamRef.current?.getTracks().forEach(t => t.stop()) }
   }, [])
 
-  const getPatients = async () => {
-    try {
-      const { data } = await supabase.from('patients').select('*, tests(*)')
-      return data || []
-    } catch { return [] }
-  }
-
-  const getCatalog = async () => {
-    try {
-      const { data } = await supabase.from('test_catalog').select('*')
-      return data || []
-    } catch { return [] }
-  }
+  // ── جلب البيانات مع cache ──
+  const getData = useCallback(async (forceRefresh = false) => {
+    const now = Date.now()
+    if (!forceRefresh && cacheRef.current.patients && (now - cacheRef.current.lastFetch < CACHE_TTL)) {
+      return { patients: cacheRef.current.patients, catalog: cacheRef.current.catalog }
+    }
+    const [{ data: patients }, { data: catalog }] = await Promise.all([
+      supabase.from('patients').select('*, tests(*)'),
+      supabase.from('test_catalog').select('*')
+    ])
+    cacheRef.current = { patients: patients || [], catalog: catalog || [], lastFetch: now }
+    return { patients: patients || [], catalog: catalog || [] }
+  }, [])
 
   const findPatient = (patients, name) => {
     if (!name) return null
@@ -226,30 +230,8 @@ export default function AIAssistant() {
       || tests?.find(t => n.includes(t.name?.toLowerCase()))
   }
 
-  const clearChat = () => {
-    setMessages([{ role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي عاوز تعمله!' }])
-    historyRef.current = []
-    setShowQuickActions(true)
-  }
-
-  const sendMessage = async (text) => {
-    const trimmed = text.trim()
-    if (!trimmed || loading) return
-    setShowQuickActions(false)
-    setMessages(prev => [...prev, { role: 'user', content: trimmed }])
-    setInput('')
-    setLoading(true)
-    historyRef.current.push({ role: 'user', content: trimmed })
-    try { await runAssistantTurn() } catch { }
-    finally { setLoading(false) }
-  }
-
-  const runAssistantTurn = async (depth = 0) => {
-    if (depth > 8) return
-
-    const [patients, catalog] = await Promise.all([getPatients(), getCatalog()])
-
-    // تجميع الكاتالوج بالكاتيجوري
+  // ── بناء system prompt بدون تكرار في كل message ──
+  const buildSystemPrompt = (patients, catalog) => {
     let catalogInfo = ''
     if (catalog.length) {
       const grouped = {}
@@ -271,7 +253,7 @@ export default function AIAssistant() {
       ).join('\n')
       : 'مفيش مرضى دلوقتي'
 
-    const systemPrompt = `أنت "لابو"، مساعد ذكي في معمل طبي، شخصيتك:
+    return `أنت "لابو"، مساعد ذكي في معمل طبي، شخصيتك:
 - بتتكلم بالعربية العامية المصرية البسيطة وبروح وحماس
 - عندك معرفة موسوعية في كل المجالات
 - بتنفذ الطلبات فوراً لو واضحة
@@ -303,10 +285,50 @@ ${catalogInfo || 'لم يتم إضافة تحاليل للكاتالوج بعد'
 
 بيانات المرضى الحاليين:
 ${patientsInfo}`
+  }
+
+  const clearChat = () => {
+    setMessages([{ role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي عاوز تعمله!' }])
+    historyRef.current = []
+    setShowQuickActions(true)
+  }
+
+  // ── تقليم التاريخ لآخر MAX_HISTORY رسالة ──
+  const trimHistory = () => {
+    if (historyRef.current.length > MAX_HISTORY) {
+      historyRef.current = historyRef.current.slice(-MAX_HISTORY)
+    }
+  }
+
+  const sendMessage = async (text) => {
+    const trimmed = text.trim()
+    if (!trimmed || loading) return
+    setShowQuickActions(false)
+    setMessages(prev => [...prev, { role: 'user', content: trimmed }])
+    setInput('')
+    setLoading(true)
+    historyRef.current.push({ role: 'user', content: trimmed })
+    trimHistory()
+
+    // جلب البيانات مرة واحدة بس في بداية كل رسالة
+    const { patients, catalog } = await getData()
+
+    try { await runAssistantTurn(patients, catalog) } catch { }
+    finally { setLoading(false) }
+  }
+
+  // ── patients و catalog بيتبعتوا كـ params مش بيتجلبوا من جوا ──
+  const runAssistantTurn = async (patients, catalog, depth = 0) => {
+    if (depth > 8) return
+
+    const systemPrompt = buildSystemPrompt(patients, catalog)
 
     const data = await fetchWithRetry({
+      // system كـ role منفصل مش جزء من messages ──
+      system: systemPrompt,
       messages: [
-        { role: 'user', content: systemPrompt + '\n\nابدأ.' },
+        // أول رسالة ثابتة للتعريف
+        { role: 'user', content: 'ابدأ.' },
         { role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي عاوز تعمله!' },
         ...historyRef.current
       ],
@@ -328,13 +350,22 @@ ${patientsInfo}`
       for (const call of choice.tool_calls) {
         const result = await handleToolCall(call, patients, catalog)
         historyRef.current.push({ role: 'tool', tool_call_id: call.id, content: String(result) })
+
+        // بعد tool call اللي بيعدل داتا، نعمل refresh للـ cache
+        const mutatingTools = ['save_new_patient', 'save_test_result', 'update_patient_info', 'delete_patient', 'add_tests_to_patient']
+        if (mutatingTools.includes(call.function.name)) {
+          const fresh = await getData(true) // force refresh
+          patients = fresh.patients
+          catalog = fresh.catalog
+        }
       }
-      await runAssistantTurn(depth + 1)
+      await runAssistantTurn(patients, catalog, depth + 1)
       return
     }
 
     const reply = choice.content || 'تمام!'
     historyRef.current.push({ role: 'assistant', content: reply })
+    trimHistory()
     setMessages(prev => [...prev, { role: 'assistant', content: reply }])
     speakText(reply)
   }
@@ -369,8 +400,7 @@ ${patientsInfo}`
 
       if (call.function.name === 'save_test_result') {
         showStatus(`⏳ بيحفظ نتيجة ${args.test_name}...`)
-        const allPatients = patients.length ? patients : await getPatients()
-        const patient = findPatient(allPatients, args.patient_name)
+        const patient = findPatient(patients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
         const test = findTest(patient.tests, args.test_name)
         if (!test) return `مش لاقي تحليل "${args.test_name}"`
@@ -381,8 +411,7 @@ ${patientsInfo}`
 
       if (call.function.name === 'update_patient_info') {
         showStatus(`⏳ بيعدل بيانات ${args.patient_name}...`)
-        const allPatients = patients.length ? patients : await getPatients()
-        const patient = findPatient(allPatients, args.patient_name)
+        const patient = findPatient(patients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
         const updates = {}
         if (args.new_name) updates.name = args.new_name
@@ -398,8 +427,7 @@ ${patientsInfo}`
 
       if (call.function.name === 'delete_patient') {
         showStatus(`⏳ بيمسح ${args.patient_name}...`)
-        const allPatients = patients.length ? patients : await getPatients()
-        const patient = findPatient(allPatients, args.patient_name)
+        const patient = findPatient(patients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
         await supabase.from('tests').delete().eq('patient_id', patient.id)
         const { error } = await supabase.from('patients').delete().eq('id', patient.id)
@@ -409,8 +437,7 @@ ${patientsInfo}`
 
       if (call.function.name === 'add_tests_to_patient') {
         showStatus(`⏳ بيضيف تحاليل...`)
-        const allPatients = patients.length ? patients : await getPatients()
-        const patient = findPatient(allPatients, args.patient_name)
+        const patient = findPatient(patients, args.patient_name)
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
         const testsToInsert = (args.tests || []).map(name => {
           const found = catalog?.find(c => c.name?.toLowerCase() === name.toLowerCase())
@@ -425,8 +452,7 @@ ${patientsInfo}`
       }
 
       if (call.function.name === 'open_patient_report') {
-        const allPatients = patients.length ? patients : await getPatients()
-        const match = findPatient(allPatients, args.patient_name)
+        const match = findPatient(patients, args.patient_name)
         if (match) {
           navigate('/reports', { state: { autoSelectPatientId: match.id } })
           return `تم فتح تقرير "${match.name}" ✅`
@@ -435,11 +461,8 @@ ${patientsInfo}`
       }
 
       if (call.function.name === 'answer_question') {
-        const data = await fetchWithRetry({
-          messages: [{ role: 'user', content: `أجب بالعربية العامية المصرية بدون جداول أو رموز markdown: ${args.query}` }],
-          max_tokens: 1024
-        })
-        return data?.choices?.[0]?.message?.content || 'مش عارف أجاوب دلوقتي'
+        // ── بدل API call تانية، بنرجع السؤال للموديل نفسه يجاوب ──
+        return `[أجب على السؤال ده مباشرة بالعامية المصرية: ${args.query}]`
       }
 
     } catch (err) {
@@ -513,29 +536,36 @@ ${patientsInfo}`
     return chunks
   }
 
+  // ── TTS: شغّل الـ chunks بالتوازي مع ترتيب بدل ما تنتظر كل واحدة ──
   const speakText = async (text) => {
     const chunks = splitForTTS(text)
-    for (const chunk of chunks) {
-      try {
-        const res = await fetch('https://api.groq.com/openai/v1/audio/speech', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: chunk.isArabic ? 'canopylabs/orpheus-arabic-saudi' : 'canopylabs/orpheus-v1-english',
-            voice: chunk.isArabic ? 'lulwa' : 'hannah',
-            input: chunk.text,
-            response_format: 'wav'
-          })
+
+    // جلب الـ blobs كلها مع بعض
+    const fetches = chunks.map(chunk =>
+      fetch('https://api.groq.com/openai/v1/audio/speech', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: chunk.isArabic ? 'canopylabs/orpheus-arabic-saudi' : 'canopylabs/orpheus-v1-english',
+          voice: chunk.isArabic ? 'lulwa' : 'hannah',
+          input: chunk.text,
+          response_format: 'wav'
         })
-        if (!res.ok) continue
-        const url = URL.createObjectURL(await res.blob())
-        await new Promise(resolve => {
-          const audio = new Audio(url)
-          audio.onended = () => { URL.revokeObjectURL(url); resolve() }
-          audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
-          audio.play().catch(() => resolve())
-        })
-      } catch { }
+      }).then(r => r.ok ? r.blob() : null).catch(() => null)
+    )
+
+    const blobs = await Promise.all(fetches)
+
+    // تشغيل بالترتيب
+    for (const blob of blobs) {
+      if (!blob) continue
+      const url = URL.createObjectURL(blob)
+      await new Promise(resolve => {
+        const audio = new Audio(url)
+        audio.onended = () => { URL.revokeObjectURL(url); resolve() }
+        audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
+        audio.play().catch(() => resolve())
+      })
     }
   }
 
@@ -605,7 +635,7 @@ ${patientsInfo}`
           </div>
         )}
 
-        {/* Quick Actions - بتظهر بس في أول المحادثة */}
+        {/* Quick Actions */}
         {showQuickActions && messages.length <= 1 && (
           <div className="space-y-2 mt-4">
             <p className="text-xs text-center" style={{ color: 'var(--on-surface-variant)' }}>اختصارات سريعة</p>
