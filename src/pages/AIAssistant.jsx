@@ -1,10 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
 
 const apiKey = import.meta.env.VITE_GROQ_API_KEY
-const MODELS = ['llama-3.3-70b-versatile', 'llama3-70b-8192', 'mixtral-8x7b-32768']
-const MAX_HISTORY = 20
 
 const renderMarkdown = (text) => {
   if (!text) return ''
@@ -14,7 +12,7 @@ const renderMarkdown = (text) => {
     .replace(/# (.+)/g, '<h1 style="font-size:16px;font-weight:bold;margin:10px 0 4px;color:var(--on-surface)">$1</h1>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/^[-\u2013\u2022]\s+(.+)/gm, '<div style="display:flex;gap:6px;margin:3px 0"><span style="color:var(--primary-container)">\u2022</span><span>$1</span></div>')
+    .replace(/^[-–•]\s+(.+)/gm, '<div style="display:flex;gap:6px;margin:3px 0"><span style="color:var(--primary-container)">•</span><span>$1</span></div>')
     .replace(/---+/g, '<hr style="border:none;border-top:1px solid var(--outline-variant);margin:8px 0"/>')
     .replace(/\n{2,}/g, '<br/><br/>')
     .replace(/\n/g, '<br/>')
@@ -24,48 +22,17 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'navigate_to',
-      description: 'يروح لاي صفحة في السيستم. الصفحات: /dashboard, /new-patient, /results, /reports',
-      parameters: {
-        type: 'object',
-        properties: {
-          path: { type: 'string', enum: ['/dashboard', '/new-patient', '/results', '/reports', '/ai-assistant'] },
-          patient_id: { type: 'string' }
-        },
-        required: ['path']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_stats',
-      description: 'يجيب احصائيات السيستم: عدد المرضى والتحاليل المعلقة والمكتملة',
-      parameters: {
-        type: 'object',
-        properties: {
-          period: { type: 'string', enum: ['today', 'week', 'month', 'all'] }
-        },
-        required: ['period']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
       name: 'save_new_patient',
-      description: 'يحفظ مريض جديد في النظام مع تحاليله.',
+      description: 'يحفظ مريض جديد مباشرة في النظام بدون انتظار تأكيد. استخدمه فوراً لما يطلب المستخدم تسجيل مريض.',
       parameters: {
         type: 'object',
         properties: {
-          name: { type: 'string' },
-          age: { type: 'number' },
+          name: { type: 'string', description: 'اسم المريض كامل' },
+          age: { type: 'number', description: 'سن المريض' },
           gender: { type: 'string', enum: ['ذكر', 'أنثى'] },
-          phone: { type: 'string' },
-          doctor: { type: 'string' },
-          birth_date: { type: 'string' },
-          notes: { type: 'string' },
-          tests: { type: 'array', items: { type: 'string' } }
+          phone: { type: 'string', description: 'رقم تليفون المريض (اختياري)' },
+          doctor: { type: 'string', description: 'اسم الطبيب المحوّل (اختياري)' },
+          tests: { type: 'array', items: { type: 'string' }, description: 'أسماء التحاليل المطلوبة' }
         },
         required: ['name', 'age', 'gender']
       }
@@ -75,13 +42,13 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'save_test_result',
-      description: 'يحفظ نتيجة تحليل واحد لمريض.',
+      description: 'يحفظ نتيجة تحليل مباشرة بدون انتظار تأكيد. استخدمه فوراً لما يطلب المستخدم إدخال نتيجة.',
       parameters: {
         type: 'object',
         properties: {
-          patient_name: { type: 'string' },
-          test_name: { type: 'string' },
-          value: { type: 'string' }
+          patient_name: { type: 'string', description: 'اسم المريض' },
+          test_name: { type: 'string', description: 'اسم التحليل' },
+          value: { type: 'string', description: 'قيمة النتيجة' }
         },
         required: ['patient_name', 'test_name', 'value']
       }
@@ -90,43 +57,17 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'save_multiple_results',
-      description: 'يحفظ نتائج اكتر من تحليل لمريض دفعة واحدة.',
-      parameters: {
-        type: 'object',
-        properties: {
-          patient_name: { type: 'string' },
-          results: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                test_name: { type: 'string' },
-                value: { type: 'string' }
-              },
-              required: ['test_name', 'value']
-            }
-          }
-        },
-        required: ['patient_name', 'results']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
       name: 'update_patient_info',
-      description: 'يعدل بيانات مريض موجود.',
+      description: 'يعدل بيانات مريض موجود (اسم، سن، جنس، دكتور، موبايل). استخدمه لما يقول المستخدم إن في بيانات غلط.',
       parameters: {
         type: 'object',
         properties: {
-          patient_name: { type: 'string' },
-          new_name: { type: 'string' },
-          new_age: { type: 'number' },
-          new_gender: { type: 'string', enum: ['ذكر', 'أنثى'] },
-          new_doctor: { type: 'string' },
-          new_phone: { type: 'string' },
-          new_notes: { type: 'string' }
+          patient_name: { type: 'string', description: 'اسم المريض الحالي في النظام' },
+          new_name: { type: 'string', description: 'الاسم الجديد (اختياري)' },
+          new_age: { type: 'number', description: 'السن الجديد (اختياري)' },
+          new_gender: { type: 'string', enum: ['ذكر', 'أنثى'], description: 'الجنس الجديد (اختياري)' },
+          new_doctor: { type: 'string', description: 'اسم الدكتور الجديد (اختياري)' },
+          new_phone: { type: 'string', description: 'رقم الموبايل الجديد (اختياري)' }
         },
         required: ['patient_name']
       }
@@ -135,44 +76,13 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'update_test_details',
-      description: 'يعدل تفاصيل تحليل معين (اسمه، المعدل الطبيعي، الوحدة).',
-      parameters: {
-        type: 'object',
-        properties: {
-          patient_name: { type: 'string' },
-          test_name: { type: 'string' },
-          new_name: { type: 'string' },
-          new_normal_range: { type: 'string' },
-          new_unit: { type: 'string' }
-        },
-        required: ['patient_name', 'test_name']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'delete_test',
-      description: 'يمسح تحليل معين من مريض.',
-      parameters: {
-        type: 'object',
-        properties: {
-          patient_name: { type: 'string' },
-          test_name: { type: 'string' }
-        },
-        required: ['patient_name', 'test_name']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
       name: 'delete_patient',
-      description: 'يمسح مريض وكل تحاليله نهائيا.',
+      description: 'يمسح مريض وكل تحاليله من النظام. استخدمه بس لما يطلب المستخدم صراحة مسح المريض.',
       parameters: {
         type: 'object',
-        properties: { patient_name: { type: 'string' } },
+        properties: {
+          patient_name: { type: 'string', description: 'اسم المريض المطلوب مسحه' }
+        },
         required: ['patient_name']
       }
     }
@@ -181,12 +91,12 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'add_tests_to_patient',
-      description: 'يضيف تحاليل جديدة لمريض موجود.',
+      description: 'يضيف تحاليل جديدة لمريض موجود بالفعل في النظام.',
       parameters: {
         type: 'object',
         properties: {
           patient_name: { type: 'string' },
-          tests: { type: 'array', items: { type: 'string' } }
+          tests: { type: 'array', items: { type: 'string' }, description: 'أسماء التحاليل الجديدة' }
         },
         required: ['patient_name', 'tests']
       }
@@ -196,10 +106,12 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'open_patient_report',
-      description: 'يفتح تقرير مريض في صفحة التقارير.',
+      description: 'يفتح صفحة التقارير ويحدد مريض معين للطباعة.',
       parameters: {
         type: 'object',
-        properties: { patient_name: { type: 'string' } },
+        properties: {
+          patient_name: { type: 'string' }
+        },
         required: ['patient_name']
       }
     }
@@ -207,53 +119,17 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'answer_question',
-      description: 'يجاوب على اي سؤال طبي او عام او معلوماتي.',
+      name: 'search_medical_info',
+      description: 'يبحث في الإنترنت عن معلومات طبية دقيقة وحديثة.',
       parameters: {
         type: 'object',
-        properties: { query: { type: 'string' } },
+        properties: {
+          query: { type: 'string' }
+        },
         required: ['query']
       }
     }
   }
-]
-
-const fetchWithRetry = async (body) => {
-  for (const model of MODELS) {
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ ...body, model })
-      })
-      if (res.ok) {
-        const data = await res.json()
-        if (data.choices?.[0]?.message) return data
-      }
-    } catch { }
-  }
-  for (const model of MODELS) {
-    try {
-      const { tools, tool_choice, parallel_tool_calls, ...rest } = body
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ ...rest, model })
-      })
-      if (res.ok) {
-        const data = await res.json()
-        if (data.choices?.[0]?.message) return data
-      }
-    } catch { }
-  }
-  return null
-}
-
-const QUICK_ACTIONS = [
-  { label: 'مريض جديد', navigate: '/new-patient' },
-  { label: 'التحاليل المتاحة', text: 'ايه التحاليل المتاحة في المعمل؟' },
-  { label: 'احصائيات النهارده', text: 'ايه احصائيات النهارده؟' },
-  { label: 'طباعة تقرير', text: 'عاوز اطبع تقرير مريض' },
 ]
 
 export default function AIAssistant() {
@@ -262,14 +138,10 @@ export default function AIAssistant() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [listening, setListening] = useState(false)
-  const [showQuickActions, setShowQuickActions] = useState(true)
   const messagesEndRef = useRef(null)
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
-  const inputRef = useRef(null)
-  const cacheRef = useRef({ patients: null, catalog: null, lastFetch: 0 })
-  const CACHE_TTL = 30000
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -279,346 +151,270 @@ export default function AIAssistant() {
     return () => { streamRef.current?.getTracks().forEach(t => t.stop()) }
   }, [])
 
-  const getData = useCallback(async (forceRefresh = false) => {
-    const now = Date.now()
-    if (!forceRefresh && cacheRef.current.patients && (now - cacheRef.current.lastFetch < CACHE_TTL)) {
-      return { patients: cacheRef.current.patients, catalog: cacheRef.current.catalog }
-    }
-    const [{ data: patients }, { data: catalog }] = await Promise.all([
-      supabase.from('patients').select('*, tests(*)').order('created_at', { ascending: false }),
-      supabase.from('test_catalog').select('*').order('category')
-    ])
-    cacheRef.current = { patients: patients || [], catalog: catalog || [], lastFetch: now }
-    return { patients: patients || [], catalog: catalog || [] }
-  }, [])
-
-  const findPatient = (patients, name) => {
-    if (!name) return null
-    const n = name.trim().toLowerCase()
-    return patients.find(p => p.name?.trim().toLowerCase() === n)
-      || patients.find(p => p.name?.toLowerCase().includes(n))
-      || patients.find(p => n.includes(p.name?.toLowerCase()))
-  }
-
-  const findTest = (tests, name) => {
-    if (!name) return null
-    const n = name.trim().toLowerCase()
-    return tests?.find(t => t.name?.toLowerCase() === n)
-      || tests?.find(t => t.name?.toLowerCase().includes(n))
-      || tests?.find(t => n.includes(t.name?.toLowerCase()))
-  }
-
-  const buildSystemPrompt = (patients, catalog) => {
-    let catalogInfo = ''
-    if (catalog.length) {
-      const grouped = {}
-      catalog.forEach(t => {
-        const cat = t.category || 'عام'
-        if (!grouped[cat]) grouped[cat] = []
-        grouped[cat].push(t.name)
-      })
-      catalogInfo = Object.entries(grouped).map(([cat, tests]) => `${cat}: ${tests.join('، ')}`).join('\n')
-    }
-
-    const patientsInfo = patients.length
-      ? patients.map(p =>
-        `- ${p.name} (${p.age}سنة، ${p.gender}) | دكتور: ${p.doctor || '-'} | تليفون: ${p.phone || '-'} | تحاليل: ${p.tests?.map(t =>
-          `${t.name}: ${t.value || 'لم تدخل'} ${t.unit || ''} [${t.normal_range || ''}] - ${t.status}`
-        ).join(', ') || 'لا يوجد'}`
-      ).join('\n')
-      : 'مفيش مرضى دلوقتي'
-
-    return `انت "لابو"، مساعد ذكي في معمل طبي، شخصيتك:
-- بتتكلم بالعربية العامية المصرية البسيطة وبروح وحماس
-- عندك معرفة موسوعية في كل المجالات
-- بتنفذ الطلبات فورا لو واضحة
-- بتقول "تمام ✅" بعد اي تنفيذ ناجح مع وصف قصير لما عملته
-- لو سالوا مين عملك: "عمي وعمك المهندس ابو المجد 😄"
-
-== صلاحياتك الكاملة في السيستم ==
-1. navigate_to: التنقل لاي صفحة /dashboard, /new-patient, /results, /reports
-2. get_stats: احصائيات المرضى والتحاليل لاي فترة
-3. save_new_patient: تسجيل مريض جديد مع تحاليله
-4. save_test_result: حفظ نتيجة تحليل واحد
-5. save_multiple_results: حفظ نتائج اكتر من تحليل دفعة واحدة
-6. update_patient_info: تعديل بيانات مريض (اسم، سن، جنس، دكتور، تليفون، ملاحظات)
-7. update_test_details: تعديل تفاصيل تحليل (اسم، معدل طبيعي، وحدة)
-8. delete_test: مسح تحليل من مريض
-9. delete_patient: مسح مريض وكل تحاليله
-10. add_tests_to_patient: اضافة تحاليل لمريض موجود
-11. open_patient_report: فتح تقرير مريض للطباعة
-12. answer_question: الاجابة على اسئلة طبية وعامة
-
-== قواعد التنفيذ ==
-- save_new_patient: استخرج كل البيانات من رسالة المستخدم دفعة واحدة. لو ناقص بيانات (اسم او سن او جنس) اسال عنهم كلهم في سؤال واحد. لو عندك كل البيانات، لخصها واسال تاكيد واحد فقط ثم نفذ فورا.
-- لو المستخدم قال "ذكر/انثى/واحد/واحدة/بنت/ولد/راجل/ست" افهمها كجنس تلقائيا بدون سؤال.
-- save_test_result و save_multiple_results: نفذ فورا بدون سؤال
-- delete_patient: اسال تاكيد مرة واحدة بس قبل الحذف
-- delete_test: نفذ فورا
-- open_patient_report و navigate_to: نفذ فورا
-- answer_question: استخدمها للاسئلة العامة والطبية
-- لو الطلب غير واضح: اسال "هل تقصد اني اعملك [الامر]؟" لو قال اه نفذ
-- لا تقول "تمام" وحدها ابدا كرد نهائي بدون تنفيذ او اجابة حقيقية
-
-== قواعد التحاليل ==
-- لو حد طلب تحليل، دور في الكاتالوج واقترح الاقرب
-- لو التحليل مش موجود في الكاتالوج، قوله "التحليل ده مش متاح دلوقتي" واقترح الاقرب
-- لو سال "ايه التحاليل المتاحة؟" اعرض الكاتالوج كامل مرتب بالفئات
-
-== قواعد الردود ==
-- لا ### ولا ** ولا جداول
-- مختصر عند التنفيذ، مفصل وبحماس عند الاسئلة
-- النصائح الغذائية: امثلة بالعامية (مش "بروتين"، قول "فراخ وبيض وفول")
-
-== التحاليل المتاحة ==
-${catalogInfo || 'لم يتم اضافة تحاليل للكاتالوج بعد'}
-
-== المرضى الحاليين ==
-${patientsInfo}`
-  }
-
-  const clearChat = () => {
-    setMessages([{ role: 'assistant', content: 'اهلا! انا لابو 👋 قولي ايه اللي عاوز تعمله!' }])
-    historyRef.current = []
-    setShowQuickActions(true)
-  }
-
-  const trimHistory = () => {
-    if (historyRef.current.length > MAX_HISTORY) {
-      historyRef.current = historyRef.current.slice(-MAX_HISTORY)
-    }
+  const getPatients = async () => {
+    const { data } = await supabase.from('patients').select('*, tests(*)')
+    return data || []
   }
 
   const sendMessage = async (text) => {
     const trimmed = text.trim()
     if (!trimmed || loading) return
-    setShowQuickActions(false)
     setMessages(prev => [...prev, { role: 'user', content: trimmed }])
     setInput('')
     setLoading(true)
     historyRef.current.push({ role: 'user', content: trimmed })
-    trimHistory()
-    const { patients, catalog } = await getData()
-    try { await runAssistantTurn(patients, catalog) } catch { }
-    finally { setLoading(false) }
+    try {
+      await runAssistantTurn()
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'حدث خطأ، حاول تاني.' }])
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const runAssistantTurn = async (patients, catalog, depth = 0) => {
-    if (depth > 8) return
-    const systemPrompt = buildSystemPrompt(patients, catalog)
-    const data = await fetchWithRetry({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: 'ابدا.' },
-        { role: 'assistant', content: 'اهلا! انا لابو 👋 قولي ايه اللي عاوز تعمله!' },
-        ...historyRef.current
-      ],
-      tools: TOOLS,
-      tool_choice: 'auto',
-      parallel_tool_calls: false,
-      max_tokens: 2048
+  const runAssistantTurn = async (depth = 0) => {
+    if (depth > 6) return
+
+    const patients = await getPatients()
+    const patientsInfo = patients.map(p =>
+      `- ${p.name} (${p.age} سنة، ${p.gender}) | ID: ${p.id} | دكتور: ${p.doctor || '-'} | تحاليل: ${p.tests?.map(t =>
+        `${t.name}[ID:${t.id}] - النتيجة: ${t.value || 'لم تدخل'} ${t.unit || ''} - المعدل: ${t.normal_range || 'غير محدد'} - الحالة: ${t.status}`
+      ).join(', ')}`
+    ).join('\n')
+
+    const systemPrompt = `أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات (طب، علوم، تاريخ، تكنولوجيا، رياضة، فن، حياة عامة... أي موضوع).
+
+شخصيتك:
+- بتتكلم بالعربية العامية المصرية البسيطة
+- عندك معلومات دقيقة وعميقة في كل حاجة تقريباً، ولما حد يسألك سؤال عام (مش بس طبي) جاوبه بثقة ومعرفة حقيقية، مش بس "مش متخصص في كده"
+- أسلوبك في الرد ممتع وجذاب: بتستخدم تشبيهات بسيطة، نكتة خفيفة أحياناً، حماس في الكلام، مش رد جاف أو روبوتي
+- بتنفذ الطلبات فوراً بدون انتظار تأكيد لو الطلب واضح
+- لو الطلب فيه خطوات متعددة، بتعملهم كلهم بالترتيب في نفس الرد
+- لما بتنفذ حاجة بتقول "تمام، عملت كذا ✅" بشكل مختصر وبطعم شخصيتك
+- لو في غلطة وقولك المستخدم، بتسأل إيه الصح وبعدين بتصلح فوراً
+
+قواعد التنفيذ (مهم جداً):
+- save_new_patient: لما حد يطلب تسجيل مريض جديد، متستخدمش الأداة فوراً. الأول لخّص كل البيانات اللي فهمتها (الاسم، السن، النوع، الدكتور لو موجود، التحاليل المطلوبة) في رسالة واضحة واسأله "البيانات صحيحة؟ أسجل كذا؟". لو رد بالموافقة (زي "آه" أو "تمام" أو "صح" أو "سجل")، استخدم save_new_patient فوراً بنفس البيانات. لو رد بالنفي (زي "لا" أو "مش كده") من غير ما يحدد إيه الغلط، اسأله فوراً "تمام، إيه اللي محتاج تعدله بالظبط؟" واستنى يحدد لك. بعد ما يحدد التعديل، حدّث البيانات في فهمك واعرض الملخص الكامل تاني للتأكيد قبل التسجيل، وكرر العملية لحد ما يوافق
+- save_test_result: احفظ النتيجة فوراً بدون سؤال (لو الطلب واضح)
+- open_patient_report: افتح التقرير فوراً
+- لو الطلب فيه نتيجة + طباعة (بدون تسجيل مريض جديد)، استخدم الأدوات المطلوبة بالترتيب في نفس الرد
+- لو قالك "ده غلط"، اسأله "إيه الصح؟" وبعد ما يقولك صلح فوراً بـ update_patient_info أو save_test_result
+
+التعامل مع الكلام الغامض أو الصوت غير الواضح (مهم جداً):
+- لو الرسالة (مكتوبة أو منقولة من صوت) غير واضحة وما تقدرش تحدد بدقة إنها تطابق أمر معين، لا تنفذ أي أداة فوراً
+- خمّن أقرب أمر ممكن من الأوامر المتاحة (تسجيل مريض، حفظ نتيجة تحليل، تعديل بيانات مريض، حذف مريض، إضافة تحاليل، فتح تقرير) واسأل المستخدم بوضوح، مثلاً: "تقصد إني أسجل مريض اسمه أحمد عنده تحليل سكر؟"
+- لو رد المستخدم بالإيجاب (زي "آه" أو "تمام" أو "صح")، نفّذ الأمر فوراً بالأداة المناسبة بدون سؤال تاني
+- لو رد بالنفي (زي "لا" أو "مش كده")، قول له بلطف: "حاول تتكلم بصوت أوضح أو اكتب الطلب، عشان أنفذه بدقة" ولا تنفذ أي شيء
+- لو الطلب واضح من الأساس، اتبع قواعد التنفيذ الفوري العادية ولا تسأل أبداً
+
+لو سُئلت عن هويتك أو مين اللي عملك أو طورك (زي "مين عملك؟" أو "مين اللي صنعك؟"):
+- رد بس بـ: "عمي وعمك المهندس أبو المجد 😄"
+- متفتحش الموضوع أكتر من كذا
+
+قواعد الردود:
+- لا تستخدم ### أو ** أو جداول
+- ردودك مختصرة ومباشرة لما تكون بتنفذ أمر في النظام
+- لكن لما يسألك سؤال عام أو معرفي، ردك ممكن يكون أطول شوية وفيه روح وحماس، بس برده من غير لغو أو حشو زيادة
+- بعد كل تنفيذ ناجح، أكد بجملة واحدة بسيطة بطعم شخصيتك
+
+قواعد النصائح الغذائية (مهم):
+- لما تقترح أو تنصح بأنواع أكل معينة للمريض (زي "كل أكل غني بالحديد" أو "قلل الدهون")، لازم تدي أمثلة محددة وملموسة بالعامية المصرية لكل نوع تقترحه
+- مثلاً متقولش "كل أكل غني بالبروتين" وتسكت، قول "كل أكل غني بالبروتين، زي الفراخ والبيض والفول"
+- خلي الأمثلة من أكل يومي ومعروف للناس، مش أسماء غريبة أو أكاديمية
+- لو في أكتر من نوع غذائي منصوح بيه، اعمل مثال واحد على الأقل لكل نوع، مش تجميعهم كلهم في جملة عامة
+
+بيانات المرضى الحالية:
+${patientsInfo || 'مفيش مرضى دلوقتي'}`
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'openai/gpt-oss-120b',
+        messages: [
+          { role: 'user', content: systemPrompt + '\n\nابدأ.' },
+          { role: 'assistant', content: 'أهلاً! أنا لابو، جاهز أنفذ أي طلب فوراً 😊' },
+          ...historyRef.current
+        ],
+        tools: TOOLS,
+        tool_choice: 'auto',
+        parallel_tool_calls: true
+      })
     })
-    if (!data) return
-    const choice = data.choices[0].message
-    if (choice.tool_calls?.length) {
+
+    const data = await response.json()
+    const choice = data.choices?.[0]?.message
+
+    if (choice?.tool_calls?.length) {
       historyRef.current.push({ role: 'assistant', content: choice.content || '', tool_calls: choice.tool_calls })
-      let currentPatients = patients
-      let currentCatalog = catalog
       for (const call of choice.tool_calls) {
-        const result = await handleToolCall(call, currentPatients, currentCatalog)
-        historyRef.current.push({ role: 'tool', tool_call_id: call.id, content: String(result) })
-        const mutatingTools = ['save_new_patient', 'save_test_result', 'save_multiple_results', 'update_patient_info', 'update_test_details', 'delete_patient', 'delete_test', 'add_tests_to_patient']
-        if (mutatingTools.includes(call.function.name)) {
-          const fresh = await getData(true)
-          currentPatients = fresh.patients
-          currentCatalog = fresh.catalog
-        }
+        const result = await handleToolCall(call)
+        historyRef.current.push({ role: 'tool', tool_call_id: call.id, content: result })
       }
-      await runAssistantTurn(currentPatients, currentCatalog, depth + 1)
+      await runAssistantTurn(depth + 1)
       return
     }
-    const reply = choice.content || 'تمام!'
+
+    const reply = choice?.content || 'حدث خطأ.'
     historyRef.current.push({ role: 'assistant', content: reply })
-    trimHistory()
     setMessages(prev => [...prev, { role: 'assistant', content: reply }])
     speakText(reply)
   }
 
-  const handleToolCall = async (call, patients, catalog) => {
+  const handleToolCall = async (call) => {
     let args = {}
     try { args = JSON.parse(call.function.arguments || '{}') } catch { }
-    const showStatus = (text) => setMessages(prev => [...prev, { role: 'status', content: text }])
 
-    try {
-      if (call.function.name === 'navigate_to') {
-        if (args.patient_id) {
-          navigate(args.path, { state: { autoSelectPatientId: args.patient_id } })
-        } else {
-          navigate(args.path)
-        }
-        const pageNames = { '/dashboard': 'لوحة التحكم', '/new-patient': 'تسجيل مريض جديد', '/results': 'نتائج التحاليل', '/reports': 'التقارير', '/ai-assistant': 'المساعد الذكي' }
-        return `تم فتح ${pageNames[args.path] || args.path} ✅`
-      }
+    const showStatus = (text) => {
+      setMessages(prev => [...prev, { role: 'status', content: text }])
+    }
 
-      if (call.function.name === 'get_stats') {
-        showStatus('⏳ بيجيب الاحصائيات...')
-        const getBucket = (dateStr) => {
-          const date = new Date(dateStr)
-          const now = new Date()
-          const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-          const startOfWeek = new Date(startOfToday); startOfWeek.setDate(startOfWeek.getDate() - 7)
-          const startOfMonth = new Date(startOfToday); startOfMonth.setDate(startOfMonth.getDate() - 30)
-          if (date >= startOfToday) return 'today'
-          if (date >= startOfWeek) return 'week'
-          if (date >= startOfMonth) return 'month'
-          return 'older'
-        }
-        const filtered = args.period === 'all' ? patients : patients.filter(p => getBucket(p.created_at) === args.period)
-        const allTests = filtered.flatMap(p => p.tests || [])
-        const pending = allTests.filter(t => t.status === 'معلق').length
-        const done = allTests.filter(t => t.status === 'مكتمل').length
-        const periodLabel = { today: 'النهارده', week: 'الاسبوع ده', month: 'الشهر ده', all: 'اجمالي' }[args.period]
-        return `احصائيات ${periodLabel}: ${filtered.length} مريض | ${allTests.length} تحليل | ${done} مكتمل | ${pending} معلق`
-      }
-
-      if (call.function.name === 'save_new_patient') {
-        showStatus(`⏳ بيسجل ${args.name}...`)
+    if (call.function.name === 'save_new_patient') {
+      try {
+        showStatus(`⏳ بيسجل المريض ${args.name}...`)
         const { data: patient, error } = await supabase.from('patients').insert([{
-          name: args.name, age: parseInt(args.age) || 0, gender: args.gender,
+          name: args.name, age: parseInt(args.age), gender: args.gender,
           phone: args.phone || null, doctor: args.doctor || null,
-          birth_date: args.birth_date || null, notes: args.notes || null,
         }]).select().single()
-        if (error || !patient) return `مش قادر يسجل المريض، جرب تاني`
+        if (error) throw error
+
         if (args.tests?.length) {
+          const { data: catalog } = await supabase.from('test_catalog').select('*')
           const testsToInsert = args.tests.map(name => {
-            const found = catalog?.find(c => c.name?.toLowerCase() === name.toLowerCase())
-              || catalog?.find(c => c.name?.toLowerCase().includes(name.toLowerCase()))
+            const found = catalog?.find(c => c.name.toLowerCase() === name.toLowerCase())
+              || catalog?.find(c => c.name.toLowerCase().includes(name.toLowerCase()))
             return { patient_id: patient.id, name: found?.name || name, normal_range: found?.normal_range || null, unit: found?.unit || null, status: 'معلق' }
           })
           await supabase.from('tests').insert(testsToInsert)
         }
-        return `تم تسجيل "${args.name}" بنجاح ✅ مع ${args.tests?.length || 0} تحليل`
+        return `تم تسجيل المريض "${args.name}" بنجاح مع ${args.tests?.length || 0} تحليل. ID: ${patient.id}`
+      } catch (err) {
+        return `فشل تسجيل المريض: ${err.message}`
       }
+    }
 
-      if (call.function.name === 'save_test_result') {
-        showStatus(`⏳ بيحفظ نتيجة ${args.test_name}...`)
-        const patient = findPatient(patients, args.patient_name)
+    if (call.function.name === 'save_test_result') {
+      try {
+        showStatus(`⏳ بيحفظ نتيجة ${args.test_name} للمريض ${args.patient_name}...`)
+        const patients = await getPatients()
+        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
+          || patients.find(p => p.name?.includes(args.patient_name))
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
-        const test = findTest(patient.tests, args.test_name)
-        if (!test) return `مش لاقي تحليل "${args.test_name}" عند "${args.patient_name}"`
-        const { error } = await supabase.from('tests').update({ value: args.value, status: 'مكتمل' }).eq('id', test.id)
-        if (error) return `مش قادر يحفظ، جرب تاني`
-        return `تم حفظ "${args.test_name}" = ${args.value} ✅`
-      }
 
-      if (call.function.name === 'save_multiple_results') {
-        showStatus(`⏳ بيحفظ النتائج...`)
-        const patient = findPatient(patients, args.patient_name)
-        if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
-        let saved = 0, failed = []
-        for (const r of (args.results || [])) {
-          const test = findTest(patient.tests, r.test_name)
-          if (!test) { failed.push(r.test_name); continue }
-          await supabase.from('tests').update({ value: r.value, status: 'مكتمل' }).eq('id', test.id)
-          saved++
-        }
-        let msg = `تم حفظ ${saved} نتيجة ✅`
-        if (failed.length) msg += ` | مش لاقي: ${failed.join('، ')}`
-        return msg
-      }
+        const test = patient.tests?.find(t => t.name?.toLowerCase() === args.test_name?.toLowerCase())
+          || patient.tests?.find(t => t.name?.toLowerCase().includes(args.test_name?.toLowerCase()))
+        if (!test) return `مش لاقي تحليل "${args.test_name}" للمريض "${args.patient_name}"`
 
-      if (call.function.name === 'update_patient_info') {
+        const { error } = await supabase.from('tests').update({
+          value: args.value,
+          status: args.value?.trim() ? 'مكتمل' : 'معلق'
+        }).eq('id', test.id)
+        if (error) throw error
+        return `تم حفظ نتيجة "${args.test_name}" = ${args.value} للمريض "${args.patient_name}"`
+      } catch (err) {
+        return `فشل حفظ النتيجة: ${err.message}`
+      }
+    }
+
+    if (call.function.name === 'update_patient_info') {
+      try {
         showStatus(`⏳ بيعدل بيانات ${args.patient_name}...`)
-        const patient = findPatient(patients, args.patient_name)
+        const patients = await getPatients()
+        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
+          || patients.find(p => p.name?.includes(args.patient_name))
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
+
         const updates = {}
         if (args.new_name) updates.name = args.new_name
         if (args.new_age) updates.age = parseInt(args.new_age)
         if (args.new_gender) updates.gender = args.new_gender
         if (args.new_doctor) updates.doctor = args.new_doctor
         if (args.new_phone) updates.phone = args.new_phone
-        if (args.new_notes !== undefined) updates.notes = args.new_notes
-        if (!Object.keys(updates).length) return 'مفيش تعديلات محددة'
+
         const { error } = await supabase.from('patients').update(updates).eq('id', patient.id)
-        if (error) return `مش قادر يعدل، جرب تاني`
-        return `تم تعديل بيانات "${args.patient_name}" ✅`
+        if (error) throw error
+        return `تم تعديل بيانات "${args.patient_name}" بنجاح`
+      } catch (err) {
+        return `فشل التعديل: ${err.message}`
       }
+    }
 
-      if (call.function.name === 'update_test_details') {
-        showStatus(`⏳ بيعدل التحليل...`)
-        const patient = findPatient(patients, args.patient_name)
+    if (call.function.name === 'delete_patient') {
+      try {
+        showStatus(`⏳ بيمسح المريض ${args.patient_name}...`)
+        const patients = await getPatients()
+        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
+          || patients.find(p => p.name?.includes(args.patient_name))
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
-        const test = findTest(patient.tests, args.test_name)
-        if (!test) return `مش لاقي تحليل "${args.test_name}"`
-        const updates = {}
-        if (args.new_name) updates.name = args.new_name
-        if (args.new_normal_range !== undefined) updates.normal_range = args.new_normal_range
-        if (args.new_unit !== undefined) updates.unit = args.new_unit
-        if (!Object.keys(updates).length) return 'مفيش تعديلات محددة'
-        const { error } = await supabase.from('tests').update(updates).eq('id', test.id)
-        if (error) return `مش قادر يعدل، جرب تاني`
-        return `تم تعديل "${args.test_name}" ✅`
-      }
 
-      if (call.function.name === 'delete_test') {
-        showStatus(`⏳ بيمسح التحليل...`)
-        const patient = findPatient(patients, args.patient_name)
-        if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
-        const test = findTest(patient.tests, args.test_name)
-        if (!test) return `مش لاقي تحليل "${args.test_name}"`
-        const { error } = await supabase.from('tests').delete().eq('id', test.id)
-        if (error) return `مش قادر يمسح، جرب تاني`
-        return `تم مسح تحليل "${args.test_name}" من "${args.patient_name}" ✅`
-      }
-
-      if (call.function.name === 'delete_patient') {
-        showStatus(`⏳ بيمسح ${args.patient_name}...`)
-        const patient = findPatient(patients, args.patient_name)
-        if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
         await supabase.from('tests').delete().eq('patient_id', patient.id)
         const { error } = await supabase.from('patients').delete().eq('id', patient.id)
-        if (error) return `مش قادر يمسح، جرب تاني`
-        return `تم مسح "${args.patient_name}" وكل تحاليله ✅`
+        if (error) throw error
+        return `تم مسح المريض "${args.patient_name}" وكل تحاليله`
+      } catch (err) {
+        return `فشل المسح: ${err.message}`
       }
+    }
 
-      if (call.function.name === 'add_tests_to_patient') {
-        showStatus(`⏳ بيضيف تحاليل...`)
-        const patient = findPatient(patients, args.patient_name)
+    if (call.function.name === 'add_tests_to_patient') {
+      try {
+        showStatus(`⏳ بيضيف تحاليل للمريض ${args.patient_name}...`)
+        const patients = await getPatients()
+        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
+          || patients.find(p => p.name?.includes(args.patient_name))
         if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
-        const testsToInsert = (args.tests || []).map(name => {
-          const found = catalog?.find(c => c.name?.toLowerCase() === name.toLowerCase())
-            || catalog?.find(c => c.name?.toLowerCase().includes(name.toLowerCase()))
+
+        const { data: catalog } = await supabase.from('test_catalog').select('*')
+        const testsToInsert = args.tests.map(name => {
+          const found = catalog?.find(c => c.name.toLowerCase() === name.toLowerCase())
+            || catalog?.find(c => c.name.toLowerCase().includes(name.toLowerCase()))
           return { patient_id: patient.id, name: found?.name || name, normal_range: found?.normal_range || null, unit: found?.unit || null, status: 'معلق' }
         })
         await supabase.from('tests').insert(testsToInsert)
-        return `تم اضافة ${args.tests?.length || 0} تحليل للمريض "${args.patient_name}" ✅`
+        return `تم إضافة ${args.tests.length} تحليل للمريض "${args.patient_name}"`
+      } catch (err) {
+        return `فشل إضافة التحاليل: ${err.message}`
       }
-
-      if (call.function.name === 'open_patient_report') {
-        const match = findPatient(patients, args.patient_name)
-        if (match) {
-          navigate('/reports', { state: { autoSelectPatientId: match.id } })
-          return `تم فتح تقرير "${match.name}" ✅`
-        }
-        return `مش لاقي مريض اسمه "${args.patient_name}"`
-      }
-
-      if (call.function.name === 'answer_question') {
-        return `[اجب على السؤال ده مباشرة بالعامية المصرية: ${args.query}]`
-      }
-
-    } catch (err) {
-      console.error('tool error:', err)
-      return 'حصل حاجة، جرب تاني'
     }
-    return 'تمام!'
+
+    if (call.function.name === 'open_patient_report') {
+      const patients = await getPatients()
+      const target = (args.patient_name || '').trim()
+      const match = patients.find(p => p.name?.trim() === target) || patients.find(p => p.name?.includes(target))
+      if (match) {
+        navigate('/reports', { state: { autoSelectPatientId: match.id } })
+        return `تم فتح تقرير "${match.name}" جاهز للطباعة`
+      }
+      return `مش لاقي مريض اسمه "${target}"`
+    }
+
+    if (call.function.name === 'search_medical_info') {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: 'groq/compound',
+            messages: [{ role: 'user', content: `ابحث وجاوب بعربي بسيط بدون جداول أو Markdown: ${args.query || ''}` }]
+          })
+        })
+        const data = await res.json()
+        return data.choices?.[0]?.message?.content || 'مش لقيت نتايج.'
+      } catch {
+        return 'حصل خطأ في البحث.'
+      }
+    }
+
+    return 'أداة غير معروفة.'
   }
 
   const toggleListening = () => { if (listening) stopListening(); else startListening() }
 
   const startListening = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+      })
       streamRef.current = stream
       audioChunksRef.current = []
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
@@ -627,132 +423,130 @@ ${patientsInfo}`
       recorder.onstop = async () => {
         streamRef.current?.getTracks().forEach(t => t.stop())
         streamRef.current = null
-        const blob = new Blob(audioChunksRef.current, { type: mimeType })
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
         audioChunksRef.current = []
-        await transcribeAudio(blob)
+        await transcribeAudio(audioBlob)
       }
       mediaRecorderRef.current = recorder
       recorder.start()
       setListening(true)
-    } catch { alert('محتاجين اذن الميكروفون') }
+    } catch {
+      alert('محتاجين إذن الميكروفون')
+    }
   }
 
   const stopListening = () => { mediaRecorderRef.current?.stop(); setListening(false) }
+
+  const LAB_VOCAB_HINT = 'Hemoglobin, Glucose, CBC, ESR, CRP, Vancomycin, Digoxin, Creatinine, Urea, ALT, AST, TSH, T3, T4, Sodium, Potassium, Calcium'
 
   const transcribeAudio = async (audioBlob) => {
     setLoading(true)
     try {
       const formData = new FormData()
-      formData.append('file', audioBlob, 'rec.webm')
+      formData.append('file', audioBlob, 'recording.webm')
       formData.append('model', 'whisper-large-v3')
       formData.append('language', 'ar')
-      formData.append('prompt', 'Hemoglobin, Glucose, CBC, ESR, CRP, Creatinine, Urea, ALT, AST, TSH, T3, T4')
+      formData.append('prompt', LAB_VOCAB_HINT)
       const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}` },
         body: formData
       })
-      if (res.ok) {
-        const data = await res.json()
-        const transcript = data.text?.trim()
-        if (transcript) { sendMessage(transcript); return }
-      }
-    } catch { }
-    setLoading(false)
+      const data = await res.json()
+      const transcript = data.text?.trim()
+      if (transcript) sendMessage(transcript)
+      else setLoading(false)
+    } catch {
+      setLoading(false)
+      alert('حصل خطأ في تحويل الصوت')
+    }
   }
 
   const splitForTTS = (text) => {
-    const clean = text.replace(/[#*|<>]/g, '').replace(/\n+/g, ' ').trim()
+    const clean = text.replace(/[#*|]/g, '').replace(/\n+/g, ' ')
+    const sentences = clean.split(/(?<=[.!؟?])\s+/).filter(s => s.trim())
     const chunks = []
-    let remaining = clean
-    while (remaining.length > 0) {
-      const piece = remaining.slice(0, 180)
-      remaining = remaining.slice(180)
-      if (piece.trim()) chunks.push({ text: piece.trim(), isArabic: (piece.match(/[\u0600-\u06FF]/g) || []).length > piece.length * 0.25 })
-    }
+    sentences.forEach(sentence => {
+      let remaining = sentence.trim()
+      while (remaining.length > 0) {
+        const piece = remaining.slice(0, 200)
+        remaining = remaining.slice(200)
+        if (piece.trim()) chunks.push({
+          text: piece.trim(),
+          isArabic: (piece.match(/[\u0600-\u06FF]/g) || []).length > piece.length * 0.3
+        })
+      }
+    })
     return chunks
   }
 
   const speakText = async (text) => {
     const chunks = splitForTTS(text)
-    const fetches = chunks.map(chunk =>
-      fetch('https://api.groq.com/openai/v1/audio/speech', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: chunk.isArabic ? 'canopylabs/orpheus-arabic-saudi' : 'canopylabs/orpheus-v1-english', voice: chunk.isArabic ? 'lulwa' : 'hannah', input: chunk.text, response_format: 'wav' })
-      }).then(r => r.ok ? r.blob() : null).catch(() => null)
-    )
-    const blobs = await Promise.all(fetches)
-    for (const blob of blobs) {
-      if (!blob) continue
-      const url = URL.createObjectURL(blob)
-      await new Promise(resolve => {
-        const audio = new Audio(url)
-        audio.onended = () => { URL.revokeObjectURL(url); resolve() }
-        audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
-        audio.play().catch(() => resolve())
-      })
+    for (const chunk of chunks) {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/audio/speech', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: chunk.isArabic ? 'canopylabs/orpheus-arabic-saudi' : 'canopylabs/orpheus-v1-english',
+            voice: chunk.isArabic ? 'lulwa' : 'hannah',
+            input: chunk.text,
+            response_format: 'wav'
+          })
+        })
+        if (!res.ok) continue
+        const audioBlob = await res.blob()
+        const url = URL.createObjectURL(audioBlob)
+        await new Promise(resolve => {
+          const audio = new Audio(url)
+          audio.onended = () => { URL.revokeObjectURL(url); resolve() }
+          audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
+          audio.play()
+        })
+      } catch { }
     }
   }
 
   return (
     <div className="flex flex-col p-6 pb-0" style={{ height: 'calc(100vh - 65px)' }} dir="rtl">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>المساعد الذكي</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>تحدث او اكتب لمساعدك الذكي "لابو"</p>
-        </div>
-        <button onClick={clearChat} className="text-xs px-3 py-1.5 rounded-lg" style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)', border: '1px solid var(--outline-variant)' }}>
-          مسح المحادثة
-        </button>
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>المساعد الذكي</h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>تحدث أو اكتب لمساعدك الذكي "لابو"</p>
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-4 pb-4">
         {messages.map((msg, i) => {
-          if (msg.role === 'status') return (
-            <div key={i} className="flex justify-center">
-              <div className="px-3 py-1 rounded-full text-xs" style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>{msg.content}</div>
-            </div>
-          )
+          if (msg.role === 'status') {
+            return (
+              <div key={i} className="flex justify-center">
+                <div className="px-3 py-1 rounded-full text-xs" style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
+                  {msg.content}
+                </div>
+              </div>
+            )
+          }
           return (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
-              {msg.role === 'assistant' && (
-                <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm flex-shrink-0 ml-2 mt-1" style={{ background: 'var(--primary-container)', color: 'white' }}>
-                  🤖
-                </div>
-              )}
               <div className="max-w-lg px-4 py-3 rounded-2xl text-sm"
-                style={{ background: msg.role === 'user' ? 'var(--primary-container)' : 'white', color: msg.role === 'user' ? 'white' : 'var(--on-surface)', border: msg.role === 'assistant' ? '1px solid var(--outline-variant)' : 'none', lineHeight: '1.8' }}>
-                {msg.role === 'assistant' ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} /> : msg.content}
+                style={{
+                  background: msg.role === 'user' ? 'var(--primary-container)' : 'white',
+                  color: msg.role === 'user' ? 'white' : 'var(--on-surface)',
+                  border: msg.role === 'assistant' ? '1px solid var(--outline-variant)' : 'none',
+                  lineHeight: '1.8'
+                }}>
+                {msg.role === 'assistant'
+                  ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                  : msg.content
+                }
               </div>
             </div>
           )
         })}
 
         {loading && (
-          <div className="flex justify-end items-center gap-2">
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm flex-shrink-0" style={{ background: 'var(--primary-container)', color: 'white' }}>🤖</div>
-            <div className="px-4 py-3 rounded-2xl text-sm bg-white flex items-center gap-1" style={{ border: '1px solid var(--outline-variant)' }}>
-              <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--primary-container)', animationDelay: '0ms' }}></span>
-              <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--primary-container)', animationDelay: '150ms' }}></span>
-              <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--primary-container)', animationDelay: '300ms' }}></span>
-            </div>
-          </div>
-        )}
-
-        {showQuickActions && messages.length <= 1 && (
-          <div className="space-y-2 mt-4">
-            <p className="text-xs text-center" style={{ color: 'var(--on-surface-variant)' }}>اختصارات سريعة</p>
-            <div className="grid grid-cols-2 gap-2">
-              {QUICK_ACTIONS.map((action, i) => (
-                <button key={i} onClick={() => action.navigate ? navigate(action.navigate) : sendMessage(action.text)}
-                  className="text-sm px-3 py-2 rounded-xl text-right transition-all"
-                  style={{ background: 'white', border: '1px solid var(--outline-variant)', color: 'var(--on-surface)' }}
-                  onMouseEnter={e => e.target.style.borderColor = 'var(--primary-container)'}
-                  onMouseLeave={e => e.target.style.borderColor = 'var(--outline-variant)'}>
-                  {action.label}
-                </button>
-              ))}
+          <div className="flex justify-end">
+            <div className="px-4 py-3 rounded-2xl text-sm bg-white" style={{ border: '1px solid var(--outline-variant)' }}>
+              <span className="animate-pulse">لابو شغال...</span>
             </div>
           </div>
         )}
@@ -760,23 +554,28 @@ ${patientsInfo}`
       </div>
 
       <div className="py-4 flex gap-3" style={{ borderTop: '1px solid var(--outline-variant)' }}>
-        <button onClick={toggleListening} className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
-          style={{ background: listening ? '#fee2e2' : '#f1f3f4', border: listening ? '2px solid #ef4444' : '1px solid var(--outline-variant)' }}>
+        <button onClick={toggleListening}
+          className="w-12 h-12 rounded-xl flex items-center justify-center text-xl"
+          style={{
+            background: listening ? '#fee2e2' : '#f1f3f4',
+            border: listening ? '2px solid #ef4444' : '1px solid var(--outline-variant)'
+          }}>
           {listening ? '🔴' : '🎤'}
         </button>
-        <input ref={inputRef} type="text" value={input}
+
+        <input type="text" value={input}
           onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage(input)}
-          placeholder="اكتب سؤالك او امرك هنا..."
+          onKeyDown={e => e.key === 'Enter' && sendMessage(input)}
+          placeholder="اكتب سؤالك أو أمرك هنا..."
           className="flex-1 px-4 py-3 rounded-xl outline-none text-right"
           style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
           onFocus={e => e.target.style.border = '2px solid var(--primary-container)'}
           onBlur={e => e.target.style.border = '1px solid var(--outline-variant)'}
-          disabled={loading}
         />
-        <button onClick={() => sendMessage(input)} disabled={loading || !input.trim()}
-          className="w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0"
-          style={{ background: loading || !input.trim() ? '#94a3b8' : 'var(--primary-container)' }}>
+
+        <button onClick={() => sendMessage(input)}
+          className="w-12 h-12 rounded-xl flex items-center justify-center text-white"
+          style={{ background: 'var(--primary-container)' }}>
           ➤
         </button>
       </div>
