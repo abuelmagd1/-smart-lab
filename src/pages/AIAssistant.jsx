@@ -18,12 +18,112 @@ const renderMarkdown = (text) => {
     .replace(/\n/g, '<br/>')
 }
 
+// أقصى عدد رسائل نسيبه في تاريخ المحادثة قبل ما نقطع القديم
+const MAX_HISTORY = 40
+// أقصى مدة تسجيل صوتي (دقيقتين) قبل ما يتوقف تلقائيًا
+const MAX_RECORDING_MS = 120000
+
+const trimHistory = (history) => {
+  if (history.length <= MAX_HISTORY) return history
+  let cutIndex = history.length - MAX_HISTORY
+  while (cutIndex < history.length && history[cutIndex].role !== 'user') {
+    cutIndex++
+  }
+  return history.slice(cutIndex)
+}
+
+// fetch بحد أقصى للوقت، ومرتبط بالـ signal الخارجي (زرار الإيقاف) كمان
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 30000) => {
+  const controller = new AbortController()
+  let timedOut = false
+  const timeoutId = setTimeout(() => { timedOut = true; controller.abort() }, timeoutMs)
+
+  const outerSignal = options.signal
+  const onOuterAbort = () => controller.abort()
+  outerSignal?.addEventListener('abort', onOuterAbort)
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } catch (err) {
+    if (err.name === 'AbortError' && timedOut) {
+      const timeoutErr = new Error('انتهى وقت الانتظار، الخدمة بطيئة دلوقتي')
+      timeoutErr.name = 'TimeoutError'
+      throw timeoutErr
+    }
+    throw err
+  } finally {
+    clearTimeout(timeoutId)
+    outerSignal?.removeEventListener('abort', onOuterAbort)
+  }
+}
+
+// زي fetchWithTimeout بس بيعيد المحاولة مرة واحدة لو الفشل كان شبكة عابرة (مش timeout ومش إيقاف من المستخدم)
+const fetchWithRetry = async (url, options, timeoutMs, retries = 1) => {
+  try {
+    return await fetchWithTimeout(url, options, timeoutMs)
+  } catch (err) {
+    if (retries > 0 && err.name !== 'AbortError' && err.name !== 'TimeoutError') {
+      await new Promise(r => setTimeout(r, 1000))
+      return fetchWithRetry(url, options, timeoutMs, retries - 1)
+    }
+    throw err
+  }
+}
+
+const safeJson = async (response) => {
+  try {
+    return await response.json()
+  } catch {
+    throw new Error('استجابة غير صالحة من الخادم')
+  }
+}
+
+const resolvePatient = (patients, name, age) => {
+  const target = (name || '').trim()
+  if (!target) return { notFound: true }
+
+  let candidates = patients.filter(p => p.name?.trim() === target)
+  if (candidates.length === 0) {
+    candidates = patients.filter(p => p.name?.includes(target))
+  }
+  if (candidates.length === 0) return { notFound: true }
+
+  if (candidates.length > 1 && age) {
+    const narrowed = candidates.filter(p => String(p.age) === String(age))
+    if (narrowed.length === 1) return { match: narrowed[0] }
+  }
+
+  if (candidates.length === 1) return { match: candidates[0] }
+  return { ambiguous: candidates }
+}
+
+const ambiguityMessage = (candidates) => {
+  const list = candidates.map(p => `- ${p.name} (${p.age} سنة، ${p.gender}${p.doctor ? '، دكتور: ' + p.doctor : ''})`).join('\n')
+  return `في أكتر من مريض بنفس الاسم تقريبًا، اسأل المستخدم يحدد المريض بالظبط (بالسن أو الدكتور المحوّل):\n${list}`
+}
+
+const matchTestsAgainstCatalog = (testNames, catalog) => {
+  const matched = []
+  const notFound = []
+  testNames.forEach(name => {
+    const found = catalog?.find(c => c.name.toLowerCase() === name.toLowerCase())
+      || catalog?.find(c => c.name.toLowerCase().includes(name.toLowerCase()))
+    if (found) {
+      matched.push({ name: found.name, normal_range: found.normal_range, unit: found.unit })
+    } else {
+      matched.push({ name, normal_range: null, unit: null })
+      notFound.push(name)
+    }
+  })
+  return { matched, notFound }
+}
+
 const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'save_new_patient',
-      description: 'يحفظ مريض جديد مباشرة في النظام بدون انتظار تأكيد. استخدمه فوراً لما يطلب المستخدم تسجيل مريض.',
+      name: 'propose_new_patient',
+      description: 'يعرض بيانات مريض جديد على المستخدم في الشات لتأكيد الحفظ. لا يحفظ البيانات مباشرة في القاعدة أبدًا.',
       parameters: {
         type: 'object',
         properties: {
@@ -41,12 +141,13 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'save_test_result',
-      description: 'يحفظ نتيجة تحليل مباشرة بدون انتظار تأكيد. استخدمه فوراً لما يطلب المستخدم إدخال نتيجة.',
+      name: 'propose_test_result',
+      description: 'يعرض نتيجة تحليل على المستخدم في الشات لتأكيد الحفظ. لا يحفظ النتيجة مباشرة أبدًا.',
       parameters: {
         type: 'object',
         properties: {
           patient_name: { type: 'string', description: 'اسم المريض' },
+          patient_age: { type: 'number', description: 'سن المريض (اختياري، يُستخدم فقط لو في أكتر من مريض بنفس الاسم)' },
           test_name: { type: 'string', description: 'اسم التحليل' },
           value: { type: 'string', description: 'قيمة النتيجة' }
         },
@@ -57,12 +158,13 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'update_patient_info',
-      description: 'يعدل بيانات مريض موجود (اسم، سن، جنس، دكتور، موبايل). استخدمه لما يقول المستخدم إن في بيانات غلط.',
+      name: 'propose_update_patient',
+      description: 'يعرض تعديل بيانات مريض موجود على المستخدم في الشات لتأكيد الحفظ. لا يعدّل البيانات مباشرة أبدًا.',
       parameters: {
         type: 'object',
         properties: {
           patient_name: { type: 'string', description: 'اسم المريض الحالي في النظام' },
+          patient_age: { type: 'number', description: 'سن المريض الحالي (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' },
           new_name: { type: 'string', description: 'الاسم الجديد (اختياري)' },
           new_age: { type: 'number', description: 'السن الجديد (اختياري)' },
           new_gender: { type: 'string', enum: ['ذكر', 'أنثى'], description: 'الجنس الجديد (اختياري)' },
@@ -76,12 +178,13 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'delete_patient',
-      description: 'يمسح مريض وكل تحاليله من النظام. استخدمه بس لما يطلب المستخدم صراحة مسح المريض.',
+      name: 'propose_delete_patient',
+      description: 'يعرض طلب حذف مريض وكل تحاليله على المستخدم في الشات لتأكيد الحذف. لا يحذف مباشرة أبدًا.',
       parameters: {
         type: 'object',
         properties: {
-          patient_name: { type: 'string', description: 'اسم المريض المطلوب مسحه' }
+          patient_name: { type: 'string', description: 'اسم المريض المطلوب حذفه' },
+          patient_age: { type: 'number', description: 'سن المريض (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' }
         },
         required: ['patient_name']
       }
@@ -91,11 +194,12 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'add_tests_to_patient',
-      description: 'يضيف تحاليل جديدة لمريض موجود بالفعل في النظام.',
+      description: 'يضيف تحاليل جديدة لمريض موجود بالفعل (عملية إضافية غير مدمّرة، فتُنفَّذ فورًا بدون تأكيد).',
       parameters: {
         type: 'object',
         properties: {
           patient_name: { type: 'string' },
+          patient_age: { type: 'number', description: 'سن المريض (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' },
           tests: { type: 'array', items: { type: 'string' }, description: 'أسماء التحاليل الجديدة' }
         },
         required: ['patient_name', 'tests']
@@ -105,12 +209,28 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'open_patient_report',
-      description: 'يفتح صفحة التقارير ويحدد مريض معين للطباعة.',
+      name: 'find_patient',
+      description: 'يجيب التفاصيل الكاملة لمريض معين (تحاليله، نتائجه، حالته) بالاسم. استخدمها أول ما تحتاج أي تفصيل عن مريض معين.',
       parameters: {
         type: 'object',
         properties: {
-          patient_name: { type: 'string' }
+          patient_name: { type: 'string' },
+          patient_age: { type: 'number', description: 'سن المريض (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' }
+        },
+        required: ['patient_name']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'open_patient_report',
+      description: 'يفتح صفحة التقارير ويحدد مريض معين للطباعة فورًا.',
+      parameters: {
+        type: 'object',
+        properties: {
+          patient_name: { type: 'string' },
+          patient_age: { type: 'number', description: 'سن المريض (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' }
         },
         required: ['patient_name']
       }
@@ -123,9 +243,7 @@ const TOOLS = [
       description: 'يبحث في الإنترنت عن معلومات طبية دقيقة وحديثة.',
       parameters: {
         type: 'object',
-        properties: {
-          query: { type: 'string' }
-        },
+        properties: { query: { type: 'string' } },
         required: ['query']
       }
     }
@@ -134,7 +252,9 @@ const TOOLS = [
 
 export default function AIAssistant() {
   const navigate = useNavigate()
-  const { chatMessages: messages, setChatMessages: setMessages, chatHistoryRef: historyRef } = useOutletContext()
+  const context = useOutletContext() || {}
+  const { chatMessages: messages, setChatMessages: setMessages, chatHistoryRef: historyRef } = context
+
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [listening, setListening] = useState(false)
@@ -142,45 +262,86 @@ export default function AIAssistant() {
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
+  const abortControllerRef = useRef(null)
+  const recordingTimeoutRef = useRef(null)
+  const currentAudioRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   useEffect(() => {
-    return () => { streamRef.current?.getTracks().forEach(t => t.stop()) }
+    return () => {
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current)
+    }
   }, [])
+
+  // لو Layout مش بيمرر الـ context الصحيح، نوريه رسالة واضحة بدل ما الصفحة تكسر بالكامل
+  if (!messages || !setMessages || !historyRef) {
+    return (
+      <div className="p-6" dir="rtl">
+        <div className="p-4 rounded-xl text-sm" style={{ background: '#fee2e2', color: '#dc2626' }}>
+          حصل خطأ في تحميل صفحة المساعد الذكي. تأكد إن الصفحة الأساسية (Layout) بتمرر chatMessages و setChatMessages و chatHistoryRef بشكل صحيح.
+        </div>
+      </div>
+    )
+  }
 
   const getPatients = async () => {
     const { data } = await supabase.from('patients').select('*, tests(*)')
     return data || []
   }
 
-  const sendMessage = async (text) => {
-    const trimmed = text.trim()
-    if (!trimmed || loading) return
-    setMessages(prev => [...prev, { role: 'user', content: trimmed }])
-    setInput('')
-    setLoading(true)
-    historyRef.current.push({ role: 'user', content: trimmed })
-    try {
-      await runAssistantTurn()
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'حدث خطأ، حاول تاني.' }])
-    } finally {
-      setLoading(false)
+  const stopSpeaking = () => {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause()
+      currentAudioRef.current = null
     }
   }
 
-  const runAssistantTurn = async (depth = 0) => {
+  const sendMessage = async (text) => {
+    const trimmed = text.trim()
+    if (!trimmed || loading) return
+
+    stopSpeaking() // لو لابو لسه بيتكلم من رد سابق، نوقفه فورًا عشان الصوتين ما يتلخبطوا
+
+    setMessages(prev => [...prev, { role: 'user', content: trimmed }])
+    setInput('')
+    setLoading(true)
+
+    historyRef.current.push({ role: 'user', content: trimmed })
+    historyRef.current = trimHistory(historyRef.current)
+
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    try {
+      await runAssistantTurn(controller.signal)
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        setMessages(prev => [...prev, { role: 'status', content: '⏹ تم إيقاف الطلب' }])
+      } else if (err.name === 'TimeoutError') {
+        setMessages(prev => [...prev, { role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع، جرّب تاني بعد لحظة.' }])
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: 'حدث خطأ، حاول تاني.' }])
+      }
+    } finally {
+      setLoading(false)
+      abortControllerRef.current = null
+    }
+  }
+
+  const stopGeneration = () => {
+    abortControllerRef.current?.abort()
+  }
+
+  const runAssistantTurn = async (signal, depth = 0) => {
     if (depth > 6) return
 
+    // بيانات خفيفة بس (اسم، سن، نوع) — هتستخدم برده لتنفيذ الأدوات في هذا الدور، بدل ما كل أداة تجيبها من جديد
     const patients = await getPatients()
-    const patientsInfo = patients.map(p =>
-      `- ${p.name} (${p.age} سنة، ${p.gender}) | ID: ${p.id} | دكتور: ${p.doctor || '-'} | تحاليل: ${p.tests?.map(t =>
-        `${t.name}[ID:${t.id}] - النتيجة: ${t.value || 'لم تدخل'} ${t.unit || ''} - المعدل: ${t.normal_range || 'غير محدد'} - الحالة: ${t.status}`
-      ).join(', ')}`
-    ).join('\n')
+    const roster = patients.map(p => `${p.name} (${p.age} سنة، ${p.gender})`).join('، ')
 
     const systemPrompt = `أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات (طب، علوم، تاريخ، تكنولوجيا، رياضة، فن، حياة عامة... أي موضوع).
 
@@ -188,70 +349,71 @@ export default function AIAssistant() {
 - بتتكلم بالعربية العامية المصرية البسيطة
 - عندك معلومات دقيقة وعميقة في كل حاجة تقريباً، ولما حد يسألك سؤال عام (مش بس طبي) جاوبه بثقة ومعرفة حقيقية، مش بس "مش متخصص في كده"
 - أسلوبك في الرد ممتع وجذاب: بتستخدم تشبيهات بسيطة، نكتة خفيفة أحياناً، حماس في الكلام، مش رد جاف أو روبوتي
-- بتنفذ الطلبات فوراً بدون انتظار تأكيد لو الطلب واضح
-- لو الطلب فيه خطوات متعددة، بتعملهم كلهم بالترتيب في نفس الرد
-- لما بتنفذ حاجة بتقول "تمام، عملت كذا ✅" بشكل مختصر وبطعم شخصيتك
-- لو في غلطة وقولك المستخدم، بتسأل إيه الصح وبعدين بتصلح فوراً
+- لما بتنفذ حاجة فورًا، بتقول "تمام، عملت كذا ✅" بشكل مختصر وبطعم شخصيتك
 
-قواعد التنفيذ (مهم جداً):
-- save_new_patient: لما حد يطلب تسجيل مريض جديد، متستخدمش الأداة فوراً. الأول لخّص كل البيانات اللي فهمتها (الاسم، السن، النوع، الدكتور لو موجود، التحاليل المطلوبة) في رسالة واضحة واسأله "البيانات صحيحة؟ أسجل كذا؟". لو رد بالموافقة (زي "آه" أو "تمام" أو "صح" أو "سجل")، استخدم save_new_patient فوراً بنفس البيانات. لو رد بالنفي (زي "لا" أو "مش كده") من غير ما يحدد إيه الغلط، اسأله فوراً "تمام، إيه اللي محتاج تعدله بالظبط؟" واستنى يحدد لك. بعد ما يحدد التعديل، حدّث البيانات في فهمك واعرض الملخص الكامل تاني للتأكيد قبل التسجيل، وكرر العملية لحد ما يوافق
-- save_test_result: احفظ النتيجة فوراً بدون سؤال (لو الطلب واضح)
-- open_patient_report: افتح التقرير فوراً
-- لو الطلب فيه نتيجة + طباعة (بدون تسجيل مريض جديد)، استخدم الأدوات المطلوبة بالترتيب في نفس الرد
-- لو قالك "ده غلط"، اسأله "إيه الصح؟" وبعد ما يقولك صلح فوراً بـ update_patient_info أو save_test_result
+بيانات المرضى المتاحة لك حاليًا (أسماء بس، بدون تفاصيل التحاليل):
+عدد المرضى: ${patients.length}
+${roster || 'لا يوجد مرضى حاليًا'}
 
-التعامل مع الكلام الغامض أو الصوت غير الواضح (مهم جداً):
-- لو الرسالة (مكتوبة أو منقولة من صوت) غير واضحة وما تقدرش تحدد بدقة إنها تطابق أمر معين، لا تنفذ أي أداة فوراً
-- خمّن أقرب أمر ممكن من الأوامر المتاحة (تسجيل مريض، حفظ نتيجة تحليل، تعديل بيانات مريض، حذف مريض، إضافة تحاليل، فتح تقرير) واسأل المستخدم بوضوح، مثلاً: "تقصد إني أسجل مريض اسمه أحمد عنده تحليل سكر؟"
-- لو رد المستخدم بالإيجاب (زي "آه" أو "تمام" أو "صح")، نفّذ الأمر فوراً بالأداة المناسبة بدون سؤال تاني
-- لو رد بالنفي (زي "لا" أو "مش كده")، قول له بلطف: "حاول تتكلم بصوت أوضح أو اكتب الطلب، عشان أنفذه بدقة" ولا تنفذ أي شيء
-- لو الطلب واضح من الأساس، اتبع قواعد التنفيذ الفوري العادية ولا تسأل أبداً
+لو احتجت أي تفصيل عن مريض معين (تحاليله، نتائجه، حالته)، استخدم أداة find_patient أولاً قبل الرد أو قبل تنفيذ أي أداة أخرى عليه. لا تخمّن بيانات مريض من نفسك أبدًا.
 
-لو سُئلت عن هويتك أو مين اللي عملك أو طورك (زي "مين عملك؟" أو "مين اللي صنعك؟"):
-- رد بس بـ: "عمي وعمك المهندس أبو المجد 😄"
-- متفتحش الموضوع أكتر من كذا
+قواعد التأكيد قبل التنفيذ (مهم جدًا، أمان البيانات الطبية يعتمد عليها):
+- propose_new_patient، propose_test_result، propose_update_patient، propose_delete_patient: الأربعة دول بيعرضوا البيانات في الشات للمستخدم يأكدها بنفسه، وما بيحفظوش أو يعدّلوا أو يمسحوا حاجة فعليًا. لو استخدمت واحدة منهم، قول للمستخدم إن البيانات معروضة وتنتظر تأكيده، ومتقولش أبدًا إن العملية "تمت".
+- add_tests_to_patient و open_patient_report و find_patient و search_medical_info: آمنين (إضافة بس، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.
+- لو الأداة رجعت لك رسالة فيها "في أكتر من مريض بنفس الاسم"، اسأل المستخدم يحدد قبل ما تكمل، لا تخمّن.
+
+التعامل مع الكلام الغامض أو الصوت غير الواضح:
+- لو الرسالة غير واضحة وما تقدرش تحدد بدقة إنها تطابق أمر معين، لا تستخدم أي أداة فوراً، خمّن أقرب أمر واسأل المستخدم بوضوح
+- لو رد بالإيجاب، استخدم الأداة المناسبة. لو رد بالنفي، قول له يتكلم أو يكتب أوضح ولا تنفذ أي شيء
+
+لو سُئلت عن هويتك أو مين اللي عملك:
+- رد بس بـ: "عمي وعمك المهندس أبو المجد 😄" ومتفتحش الموضوع أكتر
 
 قواعد الردود:
 - لا تستخدم ### أو ** أو جداول
-- ردودك مختصرة ومباشرة لما تكون بتنفذ أمر في النظام
-- لكن لما يسألك سؤال عام أو معرفي، ردك ممكن يكون أطول شوية وفيه روح وحماس، بس برده من غير لغو أو حشو زيادة
-- بعد كل تنفيذ ناجح، أكد بجملة واحدة بسيطة بطعم شخصيتك
+- ردودك مختصرة ومباشرة لما تكون بتنفذ أمر، وأطول شوية مع روح وحماس لما يسألك سؤال عام أو معرفي
 
-قواعد النصائح الغذائية (مهم):
-- لما تقترح أو تنصح بأنواع أكل معينة للمريض (زي "كل أكل غني بالحديد" أو "قلل الدهون")، لازم تدي أمثلة محددة وملموسة بالعامية المصرية لكل نوع تقترحه
-- مثلاً متقولش "كل أكل غني بالبروتين" وتسكت، قول "كل أكل غني بالبروتين، زي الفراخ والبيض والفول"
-- خلي الأمثلة من أكل يومي ومعروف للناس، مش أسماء غريبة أو أكاديمية
-- لو في أكتر من نوع غذائي منصوح بيه، اعمل مثال واحد على الأقل لكل نوع، مش تجميعهم كلهم في جملة عامة
+قواعد النصائح الغذائية:
+- لما تقترح أنواع أكل معينة، لازم تدي أمثلة ملموسة بالعامية المصرية (زي "كل أكل غني بالحديد، زي اللحمة والسبانخ والعدس")`
 
-بيانات المرضى الحالية:
-${patientsInfo || 'مفيش مرضى دلوقتي'}`
-
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const response = await fetchWithRetry('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      signal,
       body: JSON.stringify({
         model: 'openai/gpt-oss-120b',
         messages: [
           { role: 'user', content: systemPrompt + '\n\nابدأ.' },
-          { role: 'assistant', content: 'أهلاً! أنا لابو، جاهز أنفذ أي طلب فوراً 😊' },
+          { role: 'assistant', content: 'أهلاً! أنا لابو، جاهز أساعدك 😊' },
           ...historyRef.current
         ],
         tools: TOOLS,
         tool_choice: 'auto',
         parallel_tool_calls: true
       })
-    })
+    }, 35000, 1)
 
-    const data = await response.json()
+    const data = await safeJson(response)
     const choice = data.choices?.[0]?.message
 
     if (choice?.tool_calls?.length) {
       historyRef.current.push({ role: 'assistant', content: choice.content || '', tool_calls: choice.tool_calls })
+
+      // كل أداة بتشارك نفس نسخة المرضى اللي جبناها فوق بدل ما كل واحدة تجيبها من جديد
       for (const call of choice.tool_calls) {
-        const result = await handleToolCall(call)
+        let result
+        try {
+          result = await handleToolCall(call, signal, patients)
+        } catch (err) {
+          if (err.name === 'AbortError') throw err
+          // لو حصل خطأ غير متوقع في أداة، نسجل نتيجة بديلة بدل ما نكسر تسلسل المحادثة بالكامل
+          result = `حصل خطأ غير متوقع في تنفيذ هذه العملية: ${err.message}`
+        }
         historyRef.current.push({ role: 'tool', tool_call_id: call.id, content: result })
       }
-      await runAssistantTurn(depth + 1)
+
+      historyRef.current = trimHistory(historyRef.current)
+      await runAssistantTurn(signal, depth + 1)
       return
     }
 
@@ -261,146 +423,131 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
     speakText(reply)
   }
 
-  const handleToolCall = async (call) => {
+  const showStatus = (text) => {
+    setMessages(prev => [...prev, { role: 'status', content: text }])
+  }
+
+  const handleToolCall = async (call, signal, patients) => {
     let args = {}
-    try { args = JSON.parse(call.function.arguments || '{}') } catch { }
+    try { args = JSON.parse(call.function.arguments || '{}') } catch { /* تجاهل */ }
 
-    const showStatus = (text) => {
-      setMessages(prev => [...prev, { role: 'status', content: text }])
-    }
+    // ===== العمليات الحساسة: عرض كارت تأكيد فقط =====
 
-    if (call.function.name === 'save_new_patient') {
-      try {
-        showStatus(`⏳ بيسجل المريض ${args.name}...`)
-        const { data: patient, error } = await supabase.from('patients').insert([{
-          name: args.name, age: parseInt(args.age), gender: args.gender,
-          phone: args.phone || null, doctor: args.doctor || null,
-        }]).select().single()
-        if (error) throw error
-
-        if (args.tests?.length) {
-          const { data: catalog } = await supabase.from('test_catalog').select('*')
-          const testsToInsert = args.tests.map(name => {
-            const found = catalog?.find(c => c.name.toLowerCase() === name.toLowerCase())
-              || catalog?.find(c => c.name.toLowerCase().includes(name.toLowerCase()))
-            return { patient_id: patient.id, name: found?.name || name, normal_range: found?.normal_range || null, unit: found?.unit || null, status: 'معلق' }
-          })
-          await supabase.from('tests').insert(testsToInsert)
+    if (call.function.name === 'propose_new_patient') {
+      setMessages(prev => [...prev, {
+        role: 'confirm',
+        pending: {
+          type: 'new_patient', status: 'pending',
+          data: { name: args.name || '', age: args.age || '', gender: args.gender || '', phone: args.phone || '', doctor: args.doctor || '', testNames: args.tests || [] }
         }
-        return `تم تسجيل المريض "${args.name}" بنجاح مع ${args.tests?.length || 0} تحليل. ID: ${patient.id}`
-      } catch (err) {
-        return `فشل تسجيل المريض: ${err.message}`
-      }
+      }])
+      return 'تم عرض بيانات المريض الجديد على المستخدم في الشات لتأكيد الحفظ. لم يتم الحفظ فعليًا.'
     }
 
-    if (call.function.name === 'save_test_result') {
-      try {
-        showStatus(`⏳ بيحفظ نتيجة ${args.test_name} للمريض ${args.patient_name}...`)
-        const patients = await getPatients()
-        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
-          || patients.find(p => p.name?.includes(args.patient_name))
-        if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
+    if (call.function.name === 'propose_test_result') {
+      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      if (resolved.notFound) return `مش لاقي مريض اسمه "${args.patient_name}"`
+      if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
-        const test = patient.tests?.find(t => t.name?.toLowerCase() === args.test_name?.toLowerCase())
-          || patient.tests?.find(t => t.name?.toLowerCase().includes(args.test_name?.toLowerCase()))
-        if (!test) return `مش لاقي تحليل "${args.test_name}" للمريض "${args.patient_name}"`
-
-        const { error } = await supabase.from('tests').update({
-          value: args.value,
-          status: args.value?.trim() ? 'مكتمل' : 'معلق'
-        }).eq('id', test.id)
-        if (error) throw error
-        return `تم حفظ نتيجة "${args.test_name}" = ${args.value} للمريض "${args.patient_name}"`
-      } catch (err) {
-        return `فشل حفظ النتيجة: ${err.message}`
-      }
+      setMessages(prev => [...prev, {
+        role: 'confirm',
+        pending: { type: 'test_result', status: 'pending', data: { patientId: resolved.match.id, patientName: resolved.match.name, testName: args.test_name || '', value: args.value || '' } }
+      }])
+      return 'تم عرض النتيجة على المستخدم في الشات لتأكيد الحفظ. لم يتم الحفظ فعليًا.'
     }
 
-    if (call.function.name === 'update_patient_info') {
-      try {
-        showStatus(`⏳ بيعدل بيانات ${args.patient_name}...`)
-        const patients = await getPatients()
-        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
-          || patients.find(p => p.name?.includes(args.patient_name))
-        if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
+    if (call.function.name === 'propose_update_patient') {
+      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      if (resolved.notFound) return `مش لاقي مريض اسمه "${args.patient_name}"`
+      if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
-        const updates = {}
-        if (args.new_name) updates.name = args.new_name
-        if (args.new_age) updates.age = parseInt(args.new_age)
-        if (args.new_gender) updates.gender = args.new_gender
-        if (args.new_doctor) updates.doctor = args.new_doctor
-        if (args.new_phone) updates.phone = args.new_phone
+      const updates = {}
+      if (args.new_name) updates.name = args.new_name
+      if (args.new_age) updates.age = parseInt(args.new_age)
+      if (args.new_gender) updates.gender = args.new_gender
+      if (args.new_doctor) updates.doctor = args.new_doctor
+      if (args.new_phone) updates.phone = args.new_phone
 
-        const { error } = await supabase.from('patients').update(updates).eq('id', patient.id)
-        if (error) throw error
-        return `تم تعديل بيانات "${args.patient_name}" بنجاح`
-      } catch (err) {
-        return `فشل التعديل: ${err.message}`
-      }
+      setMessages(prev => [...prev, {
+        role: 'confirm',
+        pending: { type: 'update_info', status: 'pending', data: { patientId: resolved.match.id, patientName: resolved.match.name, updates } }
+      }])
+      return 'تم عرض التعديل المطلوب على المستخدم في الشات لتأكيد الحفظ. لم يتم التعديل فعليًا.'
     }
 
-    if (call.function.name === 'delete_patient') {
-      try {
-        showStatus(`⏳ بيمسح المريض ${args.patient_name}...`)
-        const patients = await getPatients()
-        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
-          || patients.find(p => p.name?.includes(args.patient_name))
-        if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
+    if (call.function.name === 'propose_delete_patient') {
+      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      if (resolved.notFound) return `مش لاقي مريض اسمه "${args.patient_name}"`
+      if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
-        await supabase.from('tests').delete().eq('patient_id', patient.id)
-        const { error } = await supabase.from('patients').delete().eq('id', patient.id)
-        if (error) throw error
-        return `تم مسح المريض "${args.patient_name}" وكل تحاليله`
-      } catch (err) {
-        return `فشل المسح: ${err.message}`
-      }
+      setMessages(prev => [...prev, {
+        role: 'confirm',
+        pending: { type: 'delete', status: 'pending', data: { patientId: resolved.match.id, patientName: resolved.match.name } }
+      }])
+      return 'تم عرض طلب الحذف على المستخدم في الشات لتأكيده. لم يتم الحذف فعليًا.'
     }
+
+    // ===== العمليات الآمنة: تنفيذ فوري =====
 
     if (call.function.name === 'add_tests_to_patient') {
       try {
-        showStatus(`⏳ بيضيف تحاليل للمريض ${args.patient_name}...`)
-        const patients = await getPatients()
-        const patient = patients.find(p => p.name?.trim() === args.patient_name?.trim())
-          || patients.find(p => p.name?.includes(args.patient_name))
-        if (!patient) return `مش لاقي مريض اسمه "${args.patient_name}"`
+        const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+        if (resolved.notFound) return `مش لاقي مريض اسمه "${args.patient_name}"`
+        if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
+        showStatus(`⏳ بيضيف تحاليل للمريض ${resolved.match.name}...`)
         const { data: catalog } = await supabase.from('test_catalog').select('*')
-        const testsToInsert = args.tests.map(name => {
-          const found = catalog?.find(c => c.name.toLowerCase() === name.toLowerCase())
-            || catalog?.find(c => c.name.toLowerCase().includes(name.toLowerCase()))
-          return { patient_id: patient.id, name: found?.name || name, normal_range: found?.normal_range || null, unit: found?.unit || null, status: 'معلق' }
-        })
+        const { matched, notFound } = matchTestsAgainstCatalog(args.tests, catalog)
+
+        const testsToInsert = matched.map(t => ({ patient_id: resolved.match.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'معلق' }))
         await supabase.from('tests').insert(testsToInsert)
-        return `تم إضافة ${args.tests.length} تحليل للمريض "${args.patient_name}"`
+
+        let msg = `تم إضافة ${matched.length} تحليل للمريض "${resolved.match.name}"`
+        if (notFound.length) msg += `. تنبيه: التحاليل دي مش موجودة في قائمة التحاليل المعتمدة فتم تسجيلها من غير معدل طبيعي محدد: ${notFound.join(', ')}`
+        return msg
       } catch (err) {
         return `فشل إضافة التحاليل: ${err.message}`
       }
     }
 
+    if (call.function.name === 'find_patient') {
+      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      if (resolved.notFound) return `مش لاقي مريض اسمه "${args.patient_name}"`
+      if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
+
+      const p = resolved.match
+      const testsInfo = p.tests?.length
+        ? p.tests.map(t => `${t.name} - النتيجة: ${t.value || 'لم تدخل بعد'} ${t.unit || ''} - المعدل الطبيعي: ${t.normal_range || 'غير محدد'} - الحالة: ${t.status}`).join('. ')
+        : 'لا توجد تحاليل مسجلة'
+      return `بيانات المريض "${p.name}": ${p.age} سنة، ${p.gender}، دكتور محوّل: ${p.doctor || 'غير محدد'}. التحاليل: ${testsInfo}`
+    }
+
     if (call.function.name === 'open_patient_report') {
-      const patients = await getPatients()
-      const target = (args.patient_name || '').trim()
-      const match = patients.find(p => p.name?.trim() === target) || patients.find(p => p.name?.includes(target))
-      if (match) {
-        navigate('/reports', { state: { autoSelectPatientId: match.id } })
-        return `تم فتح تقرير "${match.name}" جاهز للطباعة`
-      }
-      return `مش لاقي مريض اسمه "${target}"`
+      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      if (resolved.notFound) return `مش لاقي مريض اسمه "${args.patient_name}"`
+      if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
+
+      navigate('/reports', { state: { autoSelectPatientId: resolved.match.id } })
+      return `تم فتح تقرير "${resolved.match.name}" جاهز للطباعة`
     }
 
     if (call.function.name === 'search_medical_info') {
       try {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        showStatus('🔎 بيبحث في الإنترنت...')
+        const res = await fetchWithRetry('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          signal,
           body: JSON.stringify({
             model: 'groq/compound',
             messages: [{ role: 'user', content: `ابحث وجاوب بعربي بسيط بدون جداول أو Markdown: ${args.query || ''}` }]
           })
-        })
-        const data = await res.json()
+        }, 45000, 1)
+        const data = await safeJson(res)
         return data.choices?.[0]?.message?.content || 'مش لقيت نتايج.'
-      } catch {
+      } catch (err) {
+        if (err.name === 'AbortError') throw err
+        if (err.name === 'TimeoutError') return 'البحث في الإنترنت أخذ وقت طويل، اعتمد على معلوماتك العامة بدلاً من ذلك.'
         return 'حصل خطأ في البحث.'
       }
     }
@@ -408,9 +555,69 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
     return 'أداة غير معروفة.'
   }
 
+  // ===== تنفيذ الحفظ الفعلي بعد التأكيد =====
+
+  const confirmPending = async (index, pending) => {
+    setMessages(prev => prev.map((m, i) => i === index ? { ...m, pending: { ...m.pending, status: 'saving' } } : m))
+    try {
+      if (pending.type === 'new_patient') await executeNewPatient(pending.data)
+      else if (pending.type === 'test_result') await executeTestResult(pending.data)
+      else if (pending.type === 'update_info') await executeUpdatePatient(pending.data)
+      else if (pending.type === 'delete') await executeDeletePatient(pending.data)
+      setMessages(prev => prev.map((m, i) => i === index ? { ...m, pending: { ...m.pending, status: 'done' } } : m))
+    } catch (err) {
+      setMessages(prev => prev.map((m, i) => i === index ? { ...m, pending: { ...m.pending, status: 'error', error: err.message } } : m))
+    }
+  }
+
+  const cancelPending = (index) => {
+    setMessages(prev => prev.map((m, i) => i === index ? { ...m, pending: { ...m.pending, status: 'cancelled' } } : m))
+  }
+
+  const executeNewPatient = async (data) => {
+    const { data: patient, error } = await supabase.from('patients').insert([{
+      name: data.name, age: parseInt(data.age), gender: data.gender, phone: data.phone || null, doctor: data.doctor || null,
+    }]).select().single()
+    if (error) throw error
+
+    if (data.testNames?.length) {
+      const { data: catalog } = await supabase.from('test_catalog').select('*')
+      const { matched } = matchTestsAgainstCatalog(data.testNames, catalog)
+      const testsToInsert = matched.map(t => ({ patient_id: patient.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'معلق' }))
+      const { error: testsError } = await supabase.from('tests').insert(testsToInsert)
+      if (testsError) throw testsError
+    }
+  }
+
+  const executeTestResult = async (data) => {
+    const status = data.value?.trim() ? 'مكتمل' : 'معلق'
+    const patients = await getPatients()
+    const patient = patients.find(p => p.id === data.patientId)
+    const test = patient?.tests?.find(t => t.name?.toLowerCase() === data.testName?.toLowerCase())
+      || patient?.tests?.find(t => t.name?.toLowerCase().includes(data.testName?.toLowerCase()))
+    if (!test) throw new Error(`مش لاقي تحليل اسمه "${data.testName}" لدى المريض`)
+
+    const { error } = await supabase.from('tests').update({ value: data.value, status }).eq('id', test.id)
+    if (error) throw error
+  }
+
+  const executeUpdatePatient = async (data) => {
+    const { error } = await supabase.from('patients').update(data.updates).eq('id', data.patientId)
+    if (error) throw error
+  }
+
+  const executeDeletePatient = async (data) => {
+    await supabase.from('tests').delete().eq('patient_id', data.patientId)
+    const { error } = await supabase.from('patients').delete().eq('id', data.patientId)
+    if (error) throw error
+  }
+
+  // ============ الصوت الداخل ============
+
   const toggleListening = () => { if (listening) stopListening(); else startListening() }
 
   const startListening = async () => {
+    stopSpeaking() // لو لابو بيتكلم، نوقفه الأول عشان مايدخلش في التسجيل
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
@@ -423,6 +630,7 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
       recorder.onstop = async () => {
         streamRef.current?.getTracks().forEach(t => t.stop())
         streamRef.current = null
+        if (recordingTimeoutRef.current) { clearTimeout(recordingTimeoutRef.current); recordingTimeoutRef.current = null }
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
         audioChunksRef.current = []
         await transcribeAudio(audioBlob)
@@ -430,12 +638,24 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
       mediaRecorderRef.current = recorder
       recorder.start()
       setListening(true)
+
+      // وقف تلقائي لو التسجيل عدى دقيقتين (نسيان المايك شغال)
+      recordingTimeoutRef.current = setTimeout(() => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          showStatus('⏱ تم إيقاف التسجيل تلقائيًا (الحد الأقصى دقيقتين)')
+          stopListening()
+        }
+      }, MAX_RECORDING_MS)
     } catch {
       alert('محتاجين إذن الميكروفون')
     }
   }
 
-  const stopListening = () => { mediaRecorderRef.current?.stop(); setListening(false) }
+  const stopListening = () => {
+    mediaRecorderRef.current?.stop()
+    setListening(false)
+    if (recordingTimeoutRef.current) { clearTimeout(recordingTimeoutRef.current); recordingTimeoutRef.current = null }
+  }
 
   const LAB_VOCAB_HINT = 'Hemoglobin, Glucose, CBC, ESR, CRP, Vancomycin, Digoxin, Creatinine, Urea, ALT, AST, TSH, T3, T4, Sodium, Potassium, Calcium'
 
@@ -447,20 +667,35 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
       formData.append('model', 'whisper-large-v3')
       formData.append('language', 'ar')
       formData.append('prompt', LAB_VOCAB_HINT)
-      const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+
+      const res = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}` },
         body: formData
-      })
-      const data = await res.json()
+      }, 25000, 1)
+
+      if (!res.ok) {
+        setLoading(false)
+        showStatus('⚠️ حصل خطأ أثناء تحويل الصوت لنص، حاول تاني')
+        return
+      }
+
+      const data = await safeJson(res)
       const transcript = data.text?.trim()
-      if (transcript) sendMessage(transcript)
-      else setLoading(false)
-    } catch {
+      if (transcript) {
+        sendMessage(transcript)
+      } else {
+        setLoading(false)
+        showStatus('⚠️ مش قدرت أسمع كلام واضح، جرّب تاني')
+      }
+    } catch (err) {
       setLoading(false)
-      alert('حصل خطأ في تحويل الصوت')
+      if (err.name === 'TimeoutError') showStatus('⏱ تحويل الصوت أخذ وقت طويل، حاول تاني')
+      else showStatus('⚠️ حصل خطأ أثناء تحويل الصوت لنص، حاول تاني')
     }
   }
+
+  // ============ الصوت الخارج ============
 
   const splitForTTS = (text) => {
     const clean = text.replace(/[#*|]/g, '').replace(/\n+/g, ' ')
@@ -471,20 +706,19 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
       while (remaining.length > 0) {
         const piece = remaining.slice(0, 200)
         remaining = remaining.slice(200)
-        if (piece.trim()) chunks.push({
-          text: piece.trim(),
-          isArabic: (piece.match(/[\u0600-\u06FF]/g) || []).length > piece.length * 0.3
-        })
+        if (piece.trim()) chunks.push({ text: piece.trim(), isArabic: (piece.match(/[\u0600-\u06FF]/g) || []).length > piece.length * 0.3 })
       }
     })
     return chunks
   }
 
   const speakText = async (text) => {
+    stopSpeaking() // أي كلام شغال قبل كده يقف فورًا عشان الصوتين ما يتلخبطوا
     const chunks = splitForTTS(text)
+
     for (const chunk of chunks) {
       try {
-        const res = await fetch('https://api.groq.com/openai/v1/audio/speech', {
+        const res = await fetchWithTimeout('https://api.groq.com/openai/v1/audio/speech', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -493,17 +727,21 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
             input: chunk.text,
             response_format: 'wav'
           })
-        })
+        }, 15000)
+
         if (!res.ok) continue
+
         const audioBlob = await res.blob()
         const url = URL.createObjectURL(audioBlob)
+
         await new Promise(resolve => {
           const audio = new Audio(url)
-          audio.onended = () => { URL.revokeObjectURL(url); resolve() }
-          audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
+          currentAudioRef.current = audio
+          audio.onended = () => { URL.revokeObjectURL(url); if (currentAudioRef.current === audio) currentAudioRef.current = null; resolve() }
+          audio.onerror = () => { URL.revokeObjectURL(url); if (currentAudioRef.current === audio) currentAudioRef.current = null; resolve() }
           audio.play()
         })
-      } catch { }
+      } catch { /* لو قطعة فشلت، نكمل اللي بعدها */ }
     }
   }
 
@@ -519,9 +757,14 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
           if (msg.role === 'status') {
             return (
               <div key={i} className="flex justify-center">
-                <div className="px-3 py-1 rounded-full text-xs" style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
-                  {msg.content}
-                </div>
+                <div className="px-3 py-1 rounded-full text-xs" style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>{msg.content}</div>
+              </div>
+            )
+          }
+          if (msg.role === 'confirm') {
+            return (
+              <div key={i} className="flex justify-end">
+                <ConfirmCard pending={msg.pending} onConfirm={() => confirmPending(i, msg.pending)} onCancel={() => cancelPending(i)} />
               </div>
             )
           }
@@ -536,8 +779,7 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
                 }}>
                 {msg.role === 'assistant'
                   ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
-                  : msg.content
-                }
+                  : msg.content}
               </div>
             </div>
           )
@@ -545,8 +787,11 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
 
         {loading && (
           <div className="flex justify-end">
-            <div className="px-4 py-3 rounded-2xl text-sm bg-white" style={{ border: '1px solid var(--outline-variant)' }}>
+            <div className="px-4 py-3 rounded-2xl text-sm bg-white flex items-center gap-3" style={{ border: '1px solid var(--outline-variant)' }}>
               <span className="animate-pulse">لابو شغال...</span>
+              <button onClick={stopGeneration} className="text-xs font-medium px-2 py-1 rounded-lg" style={{ background: '#fee2e2', color: '#dc2626' }}>
+                ⏹ إيقاف
+              </button>
             </div>
           </div>
         )}
@@ -556,10 +801,7 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
       <div className="py-4 flex gap-3" style={{ borderTop: '1px solid var(--outline-variant)' }}>
         <button onClick={toggleListening}
           className="w-12 h-12 rounded-xl flex items-center justify-center text-xl"
-          style={{
-            background: listening ? '#fee2e2' : '#f1f3f4',
-            border: listening ? '2px solid #ef4444' : '1px solid var(--outline-variant)'
-          }}>
+          style={{ background: listening ? '#fee2e2' : '#f1f3f4', border: listening ? '2px solid #ef4444' : '1px solid var(--outline-variant)' }}>
           {listening ? '🔴' : '🎤'}
         </button>
 
@@ -573,12 +815,81 @@ ${patientsInfo || 'مفيش مرضى دلوقتي'}`
           onBlur={e => e.target.style.border = '1px solid var(--outline-variant)'}
         />
 
-        <button onClick={() => sendMessage(input)}
-          className="w-12 h-12 rounded-xl flex items-center justify-center text-white"
-          style={{ background: 'var(--primary-container)' }}>
+        <button onClick={() => sendMessage(input)} className="w-12 h-12 rounded-xl flex items-center justify-center text-white" style={{ background: 'var(--primary-container)' }}>
           ➤
         </button>
       </div>
+    </div>
+  )
+}
+
+function ConfirmCard({ pending, onConfirm, onCancel }) {
+  const { type, status, data, error } = pending
+
+  return (
+    <div className="max-w-lg w-full px-4 py-3 rounded-2xl text-sm bg-white"
+      style={{ border: type === 'delete' ? '1.5px solid #dc2626' : '1.5px solid var(--primary-container)', lineHeight: '1.7' }}>
+
+      {type === 'new_patient' && (
+        <>
+          <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>📋 تسجيل مريض جديد - يحتاج تأكيدك</p>
+          <div className="space-y-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+            <p><strong>الاسم:</strong> {data.name || '-'}</p>
+            <p><strong>السن:</strong> {data.age || '-'} • <strong>النوع:</strong> {data.gender || '-'}</p>
+            {data.phone && <p><strong>التليفون:</strong> {data.phone}</p>}
+            {data.doctor && <p><strong>الدكتور:</strong> {data.doctor}</p>}
+            <p><strong>التحاليل:</strong> {data.testNames?.length ? data.testNames.join(', ') : 'لا يوجد'}</p>
+          </div>
+        </>
+      )}
+
+      {type === 'test_result' && (
+        <>
+          <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>🧪 تسجيل نتيجة تحليل - يحتاج تأكيدك</p>
+          <div className="space-y-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+            <p><strong>المريض:</strong> {data.patientName || '-'}</p>
+            <p><strong>التحليل:</strong> {data.testName || '-'}</p>
+            <p><strong>النتيجة:</strong> {data.value || '-'}</p>
+          </div>
+        </>
+      )}
+
+      {type === 'update_info' && (
+        <>
+          <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>✏️ تعديل بيانات مريض - يحتاج تأكيدك</p>
+          <div className="space-y-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+            <p><strong>المريض:</strong> {data.patientName}</p>
+            {Object.entries(data.updates || {}).map(([key, value]) => (
+              <p key={key}><strong>{key}:</strong> {String(value)}</p>
+            ))}
+          </div>
+        </>
+      )}
+
+      {type === 'delete' && (
+        <>
+          <p className="font-semibold mb-2" style={{ color: '#dc2626' }}>⚠️ حذف مريض نهائيًا - يحتاج تأكيدك</p>
+          <p className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+            هيتم حذف المريض <strong>{data.patientName}</strong> وكل تحاليله نهائيًا. مش هترجع.
+          </p>
+        </>
+      )}
+
+      {status === 'pending' && (
+        <div className="flex gap-2 mt-3">
+          <button onClick={onCancel} className="flex-1 py-1.5 rounded-lg text-xs font-medium" style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+            إلغاء
+          </button>
+          <button onClick={onConfirm} className="flex-1 py-1.5 rounded-lg text-xs font-medium text-white" style={{ background: type === 'delete' ? '#dc2626' : 'var(--primary-container)' }}>
+            {type === 'delete' ? '🗑️ تأكيد الحذف' : '✅ تأكيد الحفظ'}
+          </button>
+        </div>
+      )}
+
+      {status === 'saving' && <p className="mt-3 text-xs animate-pulse" style={{ color: 'var(--on-surface-variant)' }}>جاري التنفيذ...</p>}
+      {status === 'done' && <p className="mt-3 text-xs font-medium" style={{ color: '#065f46' }}>✅ تم التنفيذ بنجاح</p>}
+      {status === 'cancelled' && <p className="mt-3 text-xs font-medium" style={{ color: 'var(--on-surface-variant)' }}>تم الإلغاء</p>}
+      {status === 'error' && <p className="mt-3 text-xs font-medium" style={{ color: '#dc2626' }}>❌ {error || 'حصل خطأ'}</p>}
     </div>
   )
 }
