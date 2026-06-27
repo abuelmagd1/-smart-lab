@@ -18,21 +18,21 @@ const renderMarkdown = (text) => {
     .replace(/\n/g, '<br/>')
 }
 
-// أقصى عدد رسائل نسيبه في تاريخ المحادثة قبل ما نقطع القديم
+const formatClock = (ts) => ts ? new Date(ts).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : ''
+const formatTimer = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+
+const SUGGESTIONS = ['سجّل مريض جديد', 'إيه أسباب ارتفاع السكر؟', 'اعرض حالة مريض معين', 'افتح تقرير مريض للطباعة']
+
 const MAX_HISTORY = 40
-// أقصى مدة تسجيل صوتي (دقيقتين) قبل ما يتوقف تلقائيًا
 const MAX_RECORDING_MS = 120000
 
 const trimHistory = (history) => {
   if (history.length <= MAX_HISTORY) return history
   let cutIndex = history.length - MAX_HISTORY
-  while (cutIndex < history.length && history[cutIndex].role !== 'user') {
-    cutIndex++
-  }
+  while (cutIndex < history.length && history[cutIndex].role !== 'user') cutIndex++
   return history.slice(cutIndex)
 }
 
-// fetch بحد أقصى للوقت، ومرتبط بالـ signal الخارجي (زرار الإيقاف) كمان
 const fetchWithTimeout = async (url, options = {}, timeoutMs = 30000) => {
   const controller = new AbortController()
   let timedOut = false
@@ -57,7 +57,6 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = 30000) => {
   }
 }
 
-// زي fetchWithTimeout بس بيعيد المحاولة مرة واحدة لو الفشل كان شبكة عابرة (مش timeout ومش إيقاف من المستخدم)
 const fetchWithRetry = async (url, options, timeoutMs, retries = 1) => {
   try {
     return await fetchWithTimeout(url, options, timeoutMs)
@@ -83,16 +82,13 @@ const resolvePatient = (patients, name, age) => {
   if (!target) return { notFound: true }
 
   let candidates = patients.filter(p => p.name?.trim() === target)
-  if (candidates.length === 0) {
-    candidates = patients.filter(p => p.name?.includes(target))
-  }
+  if (candidates.length === 0) candidates = patients.filter(p => p.name?.includes(target))
   if (candidates.length === 0) return { notFound: true }
 
   if (candidates.length > 1 && age) {
     const narrowed = candidates.filter(p => String(p.age) === String(age))
     if (narrowed.length === 1) return { match: narrowed[0] }
   }
-
   if (candidates.length === 1) return { match: candidates[0] }
   return { ambiguous: candidates }
 }
@@ -108,12 +104,8 @@ const matchTestsAgainstCatalog = (testNames, catalog) => {
   testNames.forEach(name => {
     const found = catalog?.find(c => c.name.toLowerCase() === name.toLowerCase())
       || catalog?.find(c => c.name.toLowerCase().includes(name.toLowerCase()))
-    if (found) {
-      matched.push({ name: found.name, normal_range: found.normal_range, unit: found.unit })
-    } else {
-      matched.push({ name, normal_range: null, unit: null })
-      notFound.push(name)
-    }
+    if (found) matched.push({ name: found.name, normal_range: found.normal_range, unit: found.unit })
+    else { matched.push({ name, normal_range: null, unit: null }); notFound.push(name) }
   })
   return { matched, notFound }
 }
@@ -258,12 +250,20 @@ export default function AIAssistant() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [listening, setListening] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
+  const [copiedIndex, setCopiedIndex] = useState(null)
+
   const messagesEndRef = useRef(null)
+  const scrollContainerRef = useRef(null)
+  const textareaRef = useRef(null)
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
   const abortControllerRef = useRef(null)
   const recordingTimeoutRef = useRef(null)
+  const recordingIntervalRef = useRef(null)
   const currentAudioRef = useRef(null)
 
   useEffect(() => {
@@ -271,13 +271,17 @@ export default function AIAssistant() {
   }, [messages])
 
   useEffect(() => {
+    textareaRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach(t => t.stop())
       if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current)
+      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current)
     }
   }, [])
 
-  // لو Layout مش بيمرر الـ context الصحيح، نوريه رسالة واضحة بدل ما الصفحة تكسر بالكامل
   if (!messages || !setMessages || !historyRef) {
     return (
       <div className="p-6" dir="rtl">
@@ -294,9 +298,38 @@ export default function AIAssistant() {
   }
 
   const stopSpeaking = () => {
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause()
-      currentAudioRef.current = null
+    if (currentAudioRef.current) { currentAudioRef.current.pause(); currentAudioRef.current = null }
+    setIsSpeaking(false)
+  }
+
+  const handleScroll = () => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 150)
+  }
+
+  const copyMessage = (i, content) => {
+    navigator.clipboard?.writeText(content)
+    setCopiedIndex(i)
+    setTimeout(() => setCopiedIndex(null), 1500)
+  }
+
+  const adjustTextareaHeight = () => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+  }
+
+  const handleInputChange = (e) => {
+    setInput(e.target.value)
+    adjustTextareaHeight()
+  }
+
+  const handleInputKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage(input)
     }
   }
 
@@ -304,10 +337,11 @@ export default function AIAssistant() {
     const trimmed = text.trim()
     if (!trimmed || loading) return
 
-    stopSpeaking() // لو لابو لسه بيتكلم من رد سابق، نوقفه فورًا عشان الصوتين ما يتلخبطوا
+    stopSpeaking()
 
-    setMessages(prev => [...prev, { role: 'user', content: trimmed }])
+    setMessages(prev => [...prev, { role: 'user', content: trimmed, time: Date.now() }])
     setInput('')
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
     setLoading(true)
 
     historyRef.current.push({ role: 'user', content: trimmed })
@@ -320,26 +354,24 @@ export default function AIAssistant() {
       await runAssistantTurn(controller.signal)
     } catch (err) {
       if (err.name === 'AbortError') {
-        setMessages(prev => [...prev, { role: 'status', content: '⏹ تم إيقاف الطلب' }])
+        setMessages(prev => [...prev, { role: 'status', content: '⏹ تم إيقاف الطلب', time: Date.now() }])
       } else if (err.name === 'TimeoutError') {
-        setMessages(prev => [...prev, { role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع، جرّب تاني بعد لحظة.' }])
+        setMessages(prev => [...prev, { role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع.', retryText: trimmed, time: Date.now() }])
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: 'حدث خطأ، حاول تاني.' }])
+        setMessages(prev => [...prev, { role: 'assistant', content: 'حدث خطأ، حاول تاني.', retryText: trimmed, time: Date.now() }])
       }
     } finally {
       setLoading(false)
       abortControllerRef.current = null
+      textareaRef.current?.focus()
     }
   }
 
-  const stopGeneration = () => {
-    abortControllerRef.current?.abort()
-  }
+  const stopGeneration = () => { abortControllerRef.current?.abort() }
 
   const runAssistantTurn = async (signal, depth = 0) => {
     if (depth > 6) return
 
-    // بيانات خفيفة بس (اسم، سن، نوع) — هتستخدم برده لتنفيذ الأدوات في هذا الدور، بدل ما كل أداة تجيبها من جديد
     const patients = await getPatients()
     const roster = patients.map(p => `${p.name} (${p.age} سنة، ${p.gender})`).join('، ')
 
@@ -399,14 +431,12 @@ ${roster || 'لا يوجد مرضى حاليًا'}
     if (choice?.tool_calls?.length) {
       historyRef.current.push({ role: 'assistant', content: choice.content || '', tool_calls: choice.tool_calls })
 
-      // كل أداة بتشارك نفس نسخة المرضى اللي جبناها فوق بدل ما كل واحدة تجيبها من جديد
       for (const call of choice.tool_calls) {
         let result
         try {
           result = await handleToolCall(call, signal, patients)
         } catch (err) {
           if (err.name === 'AbortError') throw err
-          // لو حصل خطأ غير متوقع في أداة، نسجل نتيجة بديلة بدل ما نكسر تسلسل المحادثة بالكامل
           result = `حصل خطأ غير متوقع في تنفيذ هذه العملية: ${err.message}`
         }
         historyRef.current.push({ role: 'tool', tool_call_id: call.id, content: result })
@@ -419,27 +449,22 @@ ${roster || 'لا يوجد مرضى حاليًا'}
 
     const reply = choice?.content || 'حدث خطأ.'
     historyRef.current.push({ role: 'assistant', content: reply })
-    setMessages(prev => [...prev, { role: 'assistant', content: reply }])
+    setMessages(prev => [...prev, { role: 'assistant', content: reply, time: Date.now() }])
     speakText(reply)
   }
 
   const showStatus = (text) => {
-    setMessages(prev => [...prev, { role: 'status', content: text }])
+    setMessages(prev => [...prev, { role: 'status', content: text, time: Date.now() }])
   }
 
   const handleToolCall = async (call, signal, patients) => {
     let args = {}
     try { args = JSON.parse(call.function.arguments || '{}') } catch { /* تجاهل */ }
 
-    // ===== العمليات الحساسة: عرض كارت تأكيد فقط =====
-
     if (call.function.name === 'propose_new_patient') {
       setMessages(prev => [...prev, {
-        role: 'confirm',
-        pending: {
-          type: 'new_patient', status: 'pending',
-          data: { name: args.name || '', age: args.age || '', gender: args.gender || '', phone: args.phone || '', doctor: args.doctor || '', testNames: args.tests || [] }
-        }
+        role: 'confirm', time: Date.now(),
+        pending: { type: 'new_patient', status: 'pending', data: { name: args.name || '', age: args.age || '', gender: args.gender || '', phone: args.phone || '', doctor: args.doctor || '', testNames: args.tests || [] } }
       }])
       return 'تم عرض بيانات المريض الجديد على المستخدم في الشات لتأكيد الحفظ. لم يتم الحفظ فعليًا.'
     }
@@ -450,7 +475,7 @@ ${roster || 'لا يوجد مرضى حاليًا'}
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       setMessages(prev => [...prev, {
-        role: 'confirm',
+        role: 'confirm', time: Date.now(),
         pending: { type: 'test_result', status: 'pending', data: { patientId: resolved.match.id, patientName: resolved.match.name, testName: args.test_name || '', value: args.value || '' } }
       }])
       return 'تم عرض النتيجة على المستخدم في الشات لتأكيد الحفظ. لم يتم الحفظ فعليًا.'
@@ -469,7 +494,7 @@ ${roster || 'لا يوجد مرضى حاليًا'}
       if (args.new_phone) updates.phone = args.new_phone
 
       setMessages(prev => [...prev, {
-        role: 'confirm',
+        role: 'confirm', time: Date.now(),
         pending: { type: 'update_info', status: 'pending', data: { patientId: resolved.match.id, patientName: resolved.match.name, updates } }
       }])
       return 'تم عرض التعديل المطلوب على المستخدم في الشات لتأكيد الحفظ. لم يتم التعديل فعليًا.'
@@ -481,13 +506,11 @@ ${roster || 'لا يوجد مرضى حاليًا'}
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       setMessages(prev => [...prev, {
-        role: 'confirm',
+        role: 'confirm', time: Date.now(),
         pending: { type: 'delete', status: 'pending', data: { patientId: resolved.match.id, patientName: resolved.match.name } }
       }])
       return 'تم عرض طلب الحذف على المستخدم في الشات لتأكيده. لم يتم الحذف فعليًا.'
     }
-
-    // ===== العمليات الآمنة: تنفيذ فوري =====
 
     if (call.function.name === 'add_tests_to_patient') {
       try {
@@ -555,8 +578,6 @@ ${roster || 'لا يوجد مرضى حاليًا'}
     return 'أداة غير معروفة.'
   }
 
-  // ===== تنفيذ الحفظ الفعلي بعد التأكيد =====
-
   const confirmPending = async (index, pending) => {
     setMessages(prev => prev.map((m, i) => i === index ? { ...m, pending: { ...m.pending, status: 'saving' } } : m))
     try {
@@ -617,7 +638,7 @@ ${roster || 'لا يوجد مرضى حاليًا'}
   const toggleListening = () => { if (listening) stopListening(); else startListening() }
 
   const startListening = async () => {
-    stopSpeaking() // لو لابو بيتكلم، نوقفه الأول عشان مايدخلش في التسجيل
+    stopSpeaking()
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
@@ -631,6 +652,8 @@ ${roster || 'لا يوجد مرضى حاليًا'}
         streamRef.current?.getTracks().forEach(t => t.stop())
         streamRef.current = null
         if (recordingTimeoutRef.current) { clearTimeout(recordingTimeoutRef.current); recordingTimeoutRef.current = null }
+        if (recordingIntervalRef.current) { clearInterval(recordingIntervalRef.current); recordingIntervalRef.current = null }
+        setRecordingSeconds(0)
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
         audioChunksRef.current = []
         await transcribeAudio(audioBlob)
@@ -638,8 +661,9 @@ ${roster || 'لا يوجد مرضى حاليًا'}
       mediaRecorderRef.current = recorder
       recorder.start()
       setListening(true)
+      setRecordingSeconds(0)
+      recordingIntervalRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000)
 
-      // وقف تلقائي لو التسجيل عدى دقيقتين (نسيان المايك شغال)
       recordingTimeoutRef.current = setTimeout(() => {
         if (mediaRecorderRef.current?.state === 'recording') {
           showStatus('⏱ تم إيقاف التسجيل تلقائيًا (الحد الأقصى دقيقتين)')
@@ -655,6 +679,7 @@ ${roster || 'لا يوجد مرضى حاليًا'}
     mediaRecorderRef.current?.stop()
     setListening(false)
     if (recordingTimeoutRef.current) { clearTimeout(recordingTimeoutRef.current); recordingTimeoutRef.current = null }
+    if (recordingIntervalRef.current) { clearInterval(recordingIntervalRef.current); recordingIntervalRef.current = null }
   }
 
   const LAB_VOCAB_HINT = 'Hemoglobin, Glucose, CBC, ESR, CRP, Vancomycin, Digoxin, Creatinine, Urea, ALT, AST, TSH, T3, T4, Sodium, Potassium, Calcium'
@@ -674,20 +699,12 @@ ${roster || 'لا يوجد مرضى حاليًا'}
         body: formData
       }, 25000, 1)
 
-      if (!res.ok) {
-        setLoading(false)
-        showStatus('⚠️ حصل خطأ أثناء تحويل الصوت لنص، حاول تاني')
-        return
-      }
+      if (!res.ok) { setLoading(false); showStatus('⚠️ حصل خطأ أثناء تحويل الصوت لنص، حاول تاني'); return }
 
       const data = await safeJson(res)
       const transcript = data.text?.trim()
-      if (transcript) {
-        sendMessage(transcript)
-      } else {
-        setLoading(false)
-        showStatus('⚠️ مش قدرت أسمع كلام واضح، جرّب تاني')
-      }
+      if (transcript) sendMessage(transcript)
+      else { setLoading(false); showStatus('⚠️ مش قدرت أسمع كلام واضح، جرّب تاني') }
     } catch (err) {
       setLoading(false)
       if (err.name === 'TimeoutError') showStatus('⏱ تحويل الصوت أخذ وقت طويل، حاول تاني')
@@ -713,8 +730,10 @@ ${roster || 'لا يوجد مرضى حاليًا'}
   }
 
   const speakText = async (text) => {
-    stopSpeaking() // أي كلام شغال قبل كده يقف فورًا عشان الصوتين ما يتلخبطوا
+    stopSpeaking()
     const chunks = splitForTTS(text)
+    if (chunks.length === 0) return
+    setIsSpeaking(true)
 
     for (const chunk of chunks) {
       try {
@@ -743,16 +762,40 @@ ${roster || 'لا يوجد مرضى حاليًا'}
         })
       } catch { /* لو قطعة فشلت، نكمل اللي بعدها */ }
     }
+
+    setIsSpeaking(false)
   }
 
   return (
-    <div className="flex flex-col p-6 pb-0" style={{ height: 'calc(100vh - 65px)' }} dir="rtl">
+    <div className="flex flex-col p-6 pb-0 relative" style={{ height: 'calc(100vh - 65px)' }} dir="rtl">
       <div className="mb-4">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>المساعد الذكي</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>تحدث أو اكتب لمساعدك الذكي "لابو"</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+      {isSpeaking && (
+        <div className="flex justify-center mb-2">
+          <button onClick={stopSpeaking} aria-label="إسكات لابو"
+            className="text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium"
+            style={{ background: '#e8f0fe', color: 'var(--primary-container)' }}>
+            🔊 لابو بيتكلم... (دوس للإسكات)
+          </button>
+        </div>
+      )}
+
+      <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto space-y-4 pb-4">
+        {messages.length <= 1 && (
+          <div className="flex flex-wrap gap-2 justify-center mt-6">
+            {SUGGESTIONS.map((s, idx) => (
+              <button key={idx} onClick={() => sendMessage(s)}
+                className="text-xs px-3 py-2 rounded-full transition-all"
+                style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+
         {messages.map((msg, i) => {
           if (msg.role === 'status') {
             return (
@@ -769,7 +812,7 @@ ${roster || 'لا يوجد مرضى حاليًا'}
             )
           }
           return (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-start' : 'items-end'}`}>
               <div className="max-w-lg px-4 py-3 rounded-2xl text-sm"
                 style={{
                   background: msg.role === 'user' ? 'var(--primary-container)' : 'white',
@@ -781,6 +824,22 @@ ${roster || 'لا يوجد مرضى حاليًا'}
                   ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
                   : msg.content}
               </div>
+
+              <div className="flex items-center gap-2 mt-1 px-1">
+                {msg.time && <span className="text-xs" style={{ color: 'var(--on-surface-variant)', opacity: 0.7 }}>{formatClock(msg.time)}</span>}
+                {msg.role === 'assistant' && (
+                  <button onClick={() => copyMessage(i, msg.content)} aria-label="نسخ الرد"
+                    className="text-xs" style={{ color: 'var(--on-surface-variant)', opacity: 0.7 }}>
+                    {copiedIndex === i ? '✅ تم النسخ' : '📋 نسخ'}
+                  </button>
+                )}
+                {msg.retryText && (
+                  <button onClick={() => sendMessage(msg.retryText)} aria-label="إعادة المحاولة"
+                    className="text-xs font-medium" style={{ color: 'var(--primary-container)' }}>
+                    🔄 حاول تاني
+                  </button>
+                )}
+              </div>
             </div>
           )
         })}
@@ -789,7 +848,7 @@ ${roster || 'لا يوجد مرضى حاليًا'}
           <div className="flex justify-end">
             <div className="px-4 py-3 rounded-2xl text-sm bg-white flex items-center gap-3" style={{ border: '1px solid var(--outline-variant)' }}>
               <span className="animate-pulse">لابو شغال...</span>
-              <button onClick={stopGeneration} className="text-xs font-medium px-2 py-1 rounded-lg" style={{ background: '#fee2e2', color: '#dc2626' }}>
+              <button onClick={stopGeneration} aria-label="إيقاف الطلب" className="text-xs font-medium px-2 py-1 rounded-lg" style={{ background: '#fee2e2', color: '#dc2626' }}>
                 ⏹ إيقاف
               </button>
             </div>
@@ -798,24 +857,39 @@ ${roster || 'لا يوجد مرضى حاليًا'}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="py-4 flex gap-3" style={{ borderTop: '1px solid var(--outline-variant)' }}>
-        <button onClick={toggleListening}
-          className="w-12 h-12 rounded-xl flex items-center justify-center text-xl"
+      {showScrollBtn && (
+        <button onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+          aria-label="النزول لآخر رسالة"
+          className="absolute left-1/2 -translate-x-1/2 w-9 h-9 rounded-full flex items-center justify-center shadow-md text-sm"
+          style={{ bottom: '90px', background: 'white', border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+          ⬇
+        </button>
+      )}
+
+      <div className="py-4 flex gap-3 items-end" style={{ borderTop: '1px solid var(--outline-variant)' }}>
+        <button onClick={toggleListening} aria-label={listening ? 'إيقاف التسجيل' : 'بدء التسجيل الصوتي'}
+          className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0 relative"
           style={{ background: listening ? '#fee2e2' : '#f1f3f4', border: listening ? '2px solid #ef4444' : '1px solid var(--outline-variant)' }}>
           {listening ? '🔴' : '🎤'}
         </button>
 
-        <input type="text" value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && sendMessage(input)}
-          placeholder="اكتب سؤالك أو أمرك هنا..."
-          className="flex-1 px-4 py-3 rounded-xl outline-none text-right"
-          style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
+        {listening && (
+          <span className="text-xs font-medium self-center" style={{ color: '#dc2626' }}>{formatTimer(recordingSeconds)}</span>
+        )}
+
+        <textarea ref={textareaRef} value={input} rows={1}
+          onChange={handleInputChange}
+          onKeyDown={handleInputKeyDown}
+          placeholder="اكتب سؤالك أو أمرك هنا... (Shift+Enter لسطر جديد)"
+          className="flex-1 px-4 py-3 rounded-xl outline-none text-right resize-none"
+          style={{ border: '1px solid var(--outline-variant)', fontSize: '14px', maxHeight: '120px', lineHeight: '1.5' }}
           onFocus={e => e.target.style.border = '2px solid var(--primary-container)'}
           onBlur={e => e.target.style.border = '1px solid var(--outline-variant)'}
         />
 
-        <button onClick={() => sendMessage(input)} className="w-12 h-12 rounded-xl flex items-center justify-center text-white" style={{ background: 'var(--primary-container)' }}>
+        <button onClick={() => sendMessage(input)} disabled={loading || !input.trim()} aria-label="إرسال"
+          className="w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0"
+          style={{ background: 'var(--primary-container)', opacity: (loading || !input.trim()) ? 0.5 : 1 }}>
           ➤
         </button>
       </div>
@@ -893,3 +967,4 @@ function ConfirmCard({ pending, onConfirm, onCancel }) {
     </div>
   )
 }
+
