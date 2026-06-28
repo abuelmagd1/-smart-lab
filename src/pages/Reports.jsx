@@ -14,11 +14,35 @@ const resultColor = {
   'معتمد': { color: '#065f46', bg: '#d1fae5' },
 }
 
+const periodFilters = [
+  { key: 'all', label: 'الكل' },
+  { key: 'today', label: 'اليوم' },
+  { key: 'yesterday', label: 'الامس' },
+  { key: 'week', label: 'آخر أسبوع' },
+  { key: 'month', label: 'آخر شهر' },
+  { key: 'older', label: 'قبل ذلك' },
+]
+
+const getBucket = (dateStr) => {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfYesterday = new Date(startOfToday); startOfYesterday.setDate(startOfYesterday.getDate() - 1)
+  const startOfWeek = new Date(startOfToday); startOfWeek.setDate(startOfWeek.getDate() - 7)
+  const startOfMonth = new Date(startOfToday); startOfMonth.setDate(startOfMonth.getDate() - 30)
+  if (date >= startOfToday) return 'today'
+  if (date >= startOfYesterday) return 'yesterday'
+  if (date >= startOfWeek) return 'week'
+  if (date >= startOfMonth) return 'month'
+  return 'older'
+}
+
 export default function Reports() {
   const location = useLocation()
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [periodFilter, setPeriodFilter] = useState('all')
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [settings, setSettings] = useState(null)
   const [design, setDesign] = useState({
@@ -34,7 +58,6 @@ export default function Reports() {
   const [savingDesign, setSavingDesign] = useState(false)
   const [designSaved, setDesignSaved] = useState(false)
   const previewRef = useRef(null)
-  const barcodeCanvasRef = useRef(null)
 
   useEffect(() => { fetchPatients(); fetchSettings() }, [])
 
@@ -83,7 +106,10 @@ export default function Reports() {
     setTimeout(() => setDesignSaved(false), 2000)
   }
 
-  const filtered = patients.filter(p => p.name?.includes(search))
+  const filtered = patients
+    .filter(p => periodFilter === 'all' || getBucket(p.created_at) === periodFilter)
+    .filter(p => p.name?.includes(search))
+
   const fs = parseInt(design.report_font_size) || 11
 
   const groupedTests = (patient) => {
@@ -111,12 +137,14 @@ export default function Reports() {
   const printReport = () => {
     if (!selectedPatient) return
 
-    let barcodeDataUrl = ''
-    let barcodeCode = ''
-    try {
-      const canvas = barcodeCanvasRef.current
-      if (canvas && selectedPatient.barcode_seq) {
-        barcodeCode = getBarcodeCode(selectedPatient)
+    const barcodeCode = selectedPatient.barcode_seq
+      ? getBarcodeCode(selectedPatient)
+      : null
+
+    let barcodeHtml = ''
+    if (barcodeCode) {
+      const canvas = document.createElement('canvas')
+      try {
         JsBarcode(canvas, barcodeCode, {
           format: 'CODE128',
           width: 1.5,
@@ -126,63 +154,119 @@ export default function Reports() {
           margin: 3,
           lineColor: design.report_barcode_color,
         })
-        barcodeDataUrl = canvas.toDataURL('image/png')
-      }
-    } catch { }
+        const dataUrl = canvas.toDataURL('image/png')
+        barcodeHtml = `
+          <div style="text-align:center; padding-right:10px; border-right:1px solid #eee; margin-right:10px; flex-shrink:0;">
+            <div style="font-size:9px; font-weight:bold; color:${design.report_barcode_color}; margin-bottom:3px; letter-spacing:1px;">PATIENT ID</div>
+            <img src="${dataUrl}" style="height:55px; display:block; margin:0 auto;" />
+          </div>
+        `
+      } catch { }
+    }
 
+    const hc = design.report_header_color
+    const tc = design.report_table_color
+    const ttc = design.report_table_text_color
+    const rNormal = design.report_result_normal_color
+    const rHigh = design.report_result_high_color
+    const rLow = design.report_result_low_color
     const genderText = selectedPatient.gender === 'ذكر' ? 'Male' : 'Female'
     const printDate = new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const visitDate = new Date(selectedPatient.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    const hc = design.report_header_color
-    const bc = design.report_barcode_color
+    const groups = groupedTests(selectedPatient)
+    const doctorName = settings?.doctor_name || 'اسم الطبيب'
 
-    const patientInfoWithBarcode = `
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px 30px; flex:1;">
-          ${[
-            ['Patient Name :', selectedPatient.name],
-            ['Print Date :', printDate],
-            ['Sex / Age :', `${genderText} / ${selectedPatient.age || '-'} Years`],
-            ['Visit Date :', visitDate],
-            ['Referred By :', selectedPatient.doctor || '-'],
-          ].map(([label, value]) => `
-            <div style="display:flex; gap:5px; font-size:${fs}px;">
-              <span style="font-weight:bold; color:${hc}; white-space:nowrap;">${label}</span>
-              <span style="color:#333;">${value}</span>
-            </div>
-          `).join('')}
-        </div>
-        ${barcodeDataUrl ? `
-          <div style="text-align:center; padding-right:10px; border-right: 1px solid #eee; margin-right: 10px;">
-            <div style="font-size:9px; font-weight:bold; color:${bc}; margin-bottom:3px; letter-spacing:1px;">PATIENT ID</div>
-            <img src="${barcodeDataUrl}" style="height:50px; display:block; margin: 0 auto;" />
-          </div>
-        ` : ''}
-      </div>
-    `
+    const tableRows = Object.entries(groups).map(([category, tests]) => `
+      <tr style="background:${tc}18;">
+        <td colspan="4" style="padding:6px 10px; font-weight:bold; font-size:${fs + 1}px; color:${tc}; border-top:1px solid ${tc}40; border-bottom:1px solid ${tc}40;">■ ${category}</td>
+      </tr>
+      ${tests.map((t, ti) => {
+        const num = parseFloat(String(t.value || '').replace(',', '.'))
+        const matches = String(t.normal_range || '').match(/-?\d+(\.\d+)?/g)
+        let status = t.status
+        if (!isNaN(num) && matches && matches.length >= 2) {
+          const sorted = matches.map(parseFloat).sort((a, b) => a - b)
+          status = num > sorted[1] ? 'مرتفع' : num < sorted[0] ? 'منخفض' : 'طبيعي'
+        }
+        const color = status === 'مرتفع' ? rHigh : status === 'منخفض' ? rLow : rNormal
+        return `
+          <tr style="background:${ti % 2 === 0 ? 'white' : '#fafafa'};">
+            <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">■ ${t.name}</td>
+            <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${color}; font-weight:${status === 'مرتفع' || status === 'منخفض' ? 'bold' : 'normal'};">${t.value || '---'}</td>
+            <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">${t.unit || ''}</td>
+            <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">${t.normal_range || '---'}</td>
+          </tr>
+        `
+      }).join('')}
+    `).join('')
 
-    const printContents = previewRef.current.innerHTML
-    const modifiedContents = printContents.replace(
-      /<div style="margin-bottom: 12px;">[\s\S]*?<\/div>\s*<hr/,
-      patientInfoWithBarcode + '<hr'
-    )
-
-    const win = window.open('', '_blank')
-    win.document.write(`
+    const html = `
       <html dir="ltr">
       <head>
         <title>Laboratory Report - ${selectedPatient.name}</title>
         <meta charset="UTF-8">
         <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; padding: 20px 25px; background: white; font-size: ${fs}px; color: #000; }
-          .preview-container { max-width: 100%; }
-          @media print { @page { margin: 8mm; size: A4; } }
+          * { margin:0; padding:0; box-sizing:border-box; }
+          body { font-family:Arial, sans-serif; padding:20px 25px; background:white; font-size:${fs}px; color:#000; }
+          @media print { @page { margin:8mm; size:A4; } }
         </style>
       </head>
-      <body><div class="preview-container">${modifiedContents}</div></body>
+      <body>
+        <div style="height:90px; margin-bottom:6mm;"></div>
+
+        <hr style="border:none; border-top:2px solid ${hc}; margin:10px 0;" />
+
+        <div style="background:${hc}; color:white; text-align:center; padding:6px; font-size:${fs + 2}px; font-weight:bold; margin-bottom:12px; border-radius:3px; letter-spacing:1px;">
+          Laboratory Report
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px 30px; flex:1;">
+            ${[
+              ['Patient Name :', selectedPatient.name],
+              ['Print Date :', printDate],
+              ['Sex / Age :', `${genderText} / ${selectedPatient.age || '-'} Years`],
+              ['Visit Date :', visitDate],
+              ['Referred By :', selectedPatient.doctor || '-'],
+            ].map(([label, value]) => `
+              <div style="display:flex; gap:5px; font-size:${fs}px;">
+                <span style="font-weight:bold; color:${hc}; white-space:nowrap;">${label}</span>
+                <span style="color:#333;">${value}</span>
+              </div>
+            `).join('')}
+          </div>
+          ${barcodeHtml}
+        </div>
+
+        <hr style="border:none; border-top:1px solid #ccc; margin:8px 0;" />
+
+        <table style="width:100%; border-collapse:collapse; margin-bottom:5px;">
+          <thead>
+            <tr style="background:#f0f0f0;">
+              <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:35%;">Test Name</th>
+              <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:20%;">Result</th>
+              <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:15%;">Unit</th>
+              <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:30%;">Reference range</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+
+        <div style="margin-top:25px; display:flex; justify-content:space-between; align-items:flex-end; padding-top:12px; border-top:2px solid ${hc};">
+          <div style="width:100px; height:65px; border:2px dashed ${hc}; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:${fs}px; color:${hc}; font-weight:bold; direction:rtl;">
+            ختم المعمل
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:${fs + 1}px; font-weight:bold; color:${hc}; margin-bottom:25px;">Dr. ${doctorName}</div>
+            <div style="width:160px; border-bottom:1px solid ${hc}; margin:0 auto;"></div>
+          </div>
+        </div>
+      </body>
       </html>
-    `)
+    `
+
+    const win = window.open('', '_blank')
+    win.document.write(html)
     win.document.close()
     setTimeout(() => win.print(), 800)
   }
@@ -213,7 +297,6 @@ export default function Reports() {
     return (
       <div style={{ fontFamily: 'Arial, sans-serif', fontSize: `${fs}px`, color: '#000', background: 'white', padding: '20px 25px' }}>
 
-        {/* Header فاضي */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', gap: '8mm', marginBottom: '6mm' }}>
           <div style={{ height: '90px' }}></div>
           <div style={{ height: '90px' }}></div>
@@ -222,12 +305,10 @@ export default function Reports() {
 
         <hr style={{ border: 'none', borderTop: `2px solid ${hc}`, margin: '10px 0' }} />
 
-        {/* Title */}
         <div style={{ background: hc, color: 'white', textAlign: 'center', padding: '6px', fontSize: `${fs + 2}px`, fontWeight: 'bold', marginBottom: '12px', borderRadius: '3px', letterSpacing: '1px' }}>
           Laboratory Report
         </div>
 
-        {/* Patient Info + Barcode Preview */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px 30px', flex: 1 }}>
             {[
@@ -244,7 +325,6 @@ export default function Reports() {
             ))}
           </div>
 
-          {/* Barcode Preview */}
           {patient.barcode_seq && (
             <div style={{ textAlign: 'center', paddingRight: '10px', borderRight: `1px solid #eee`, marginRight: '10px' }}>
               <div style={{ fontSize: '9px', fontWeight: 'bold', color: bc, marginBottom: '3px', letterSpacing: '1px' }}>PATIENT ID</div>
@@ -259,7 +339,6 @@ export default function Reports() {
 
         <hr style={{ border: 'none', borderTop: '1px solid #ccc', margin: '8px 0' }} />
 
-        {/* Table */}
         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '5px' }}>
           <thead>
             <tr style={{ background: '#f0f0f0' }}>
@@ -302,7 +381,6 @@ export default function Reports() {
           </tbody>
         </table>
 
-        {/* Footer */}
         <div style={{ marginTop: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingTop: '12px', borderTop: `2px solid ${hc}` }}>
           <div style={{ width: '100px', height: '65px', border: `2px dashed ${hc}`, borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: `${fs}px`, color: hc, fontWeight: 'bold', direction: 'rtl' }}>
             ختم المعمل
@@ -312,16 +390,12 @@ export default function Reports() {
             <div style={{ width: '160px', borderBottom: `1px solid ${hc}`, margin: '0 auto' }}></div>
           </div>
         </div>
-
       </div>
     )
   }
 
   return (
     <div className="p-6" dir="rtl">
-
-      <canvas ref={barcodeCanvasRef} style={{ display: 'none' }} />
-
       <div className="mb-6">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>التقارير</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>عرض وطباعة تقارير المرضى</p>
@@ -329,6 +403,22 @@ export default function Reports() {
 
       {!selectedPatient ? (
         <>
+          <div className="flex gap-2 mb-4 flex-wrap">
+            {periodFilters.map(f => (
+              <button key={f.key} onClick={() => setPeriodFilter(f.key)}
+                className="px-3 py-1 rounded-full text-xs font-medium transition-all"
+                style={{
+                  background: periodFilter === f.key ? 'var(--primary-container)' : '#f1f3f4',
+                  color: periodFilter === f.key ? 'white' : 'var(--on-surface-variant)'
+                }}>
+                {f.label}
+              </button>
+            ))}
+            <span className="text-xs self-center mr-1" style={{ color: 'var(--on-surface-variant)' }}>
+              {filtered.length} نتيجة
+            </span>
+          </div>
+
           <input type="text" placeholder="ابحث عن مريض..." value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full px-4 py-2 rounded-lg outline-none text-right mb-4"
@@ -339,6 +429,8 @@ export default function Reports() {
 
           {loading ? (
             <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>جاري التحميل...</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-10 text-sm" style={{ color: 'var(--on-surface-variant)' }}>لا يوجد مرضى مطابقين</div>
           ) : (
             <div className="space-y-4">
               {filtered.map(patient => (
@@ -387,7 +479,6 @@ export default function Reports() {
       ) : (
         <div className="flex gap-4" style={{ alignItems: 'flex-start' }}>
 
-          {/* بانيل التحكم */}
           <div className="bg-white rounded-xl p-4 flex-shrink-0" style={{ width: '220px', border: '1px solid var(--outline-variant)', position: 'sticky', top: '20px' }}>
             <h3 className="font-semibold text-sm mb-4" style={{ color: 'var(--on-surface)' }}>🎨 تصميم التقرير</h3>
 
@@ -438,7 +529,6 @@ export default function Reports() {
             </button>
           </div>
 
-          {/* البريفيو */}
           <div className="flex-1 bg-white rounded-xl overflow-hidden" style={{ border: '1px solid var(--outline-variant)' }}>
             <div ref={previewRef}>
               <PreviewReport patient={selectedPatient} />
