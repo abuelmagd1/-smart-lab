@@ -58,6 +58,7 @@ export default function Reports() {
   const [savingDesign, setSavingDesign] = useState(false)
   const [designSaved, setDesignSaved] = useState(false)
   const previewRef = useRef(null)
+  const printFrameRef = useRef(null)
 
   useEffect(() => { fetchPatients(); fetchSettings() }, [])
 
@@ -213,13 +214,10 @@ export default function Reports() {
       </head>
       <body>
         <div style="height:90px; margin-bottom:6mm;"></div>
-
         <hr style="border:none; border-top:2px solid ${hc}; margin:10px 0;" />
-
         <div style="background:${hc}; color:white; text-align:center; padding:6px; font-size:${fs + 2}px; font-weight:bold; margin-bottom:12px; border-radius:3px; letter-spacing:1px;">
           Laboratory Report
         </div>
-
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px 30px; flex:1;">
             ${[
@@ -237,9 +235,7 @@ export default function Reports() {
           </div>
           ${barcodeHtml}
         </div>
-
         <hr style="border:none; border-top:1px solid #ccc; margin:8px 0;" />
-
         <table style="width:100%; border-collapse:collapse; margin-bottom:5px;">
           <thead>
             <tr style="background:#f0f0f0;">
@@ -251,7 +247,6 @@ export default function Reports() {
           </thead>
           <tbody>${tableRows}</tbody>
         </table>
-
         <div style="margin-top:25px; display:flex; justify-content:space-between; align-items:flex-end; padding-top:12px; border-top:2px solid ${hc};">
           <div style="width:100px; height:65px; border:2px dashed ${hc}; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:${fs}px; color:${hc}; font-weight:bold; direction:rtl;">
             ختم المعمل
@@ -265,10 +260,11 @@ export default function Reports() {
       </html>
     `
 
-    const win = window.open('', '_blank')
-    win.document.write(html)
-    win.document.close()
-    setTimeout(() => win.print(), 800)
+    const frame = printFrameRef.current
+    frame.srcdoc = html
+    frame.onload = () => {
+      setTimeout(() => { frame.contentWindow.print() }, 500)
+    }
   }
 
   const PreviewReport = ({ patient }) => {
@@ -396,6 +392,9 @@ export default function Reports() {
 
   return (
     <div className="p-6" dir="rtl">
+
+      <iframe ref={printFrameRef} style={{ display: 'none' }} title="print-frame" />
+
       <div className="mb-6">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>التقارير</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>عرض وطباعة تقارير المرضى</p>
