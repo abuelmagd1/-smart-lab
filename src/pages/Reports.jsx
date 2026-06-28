@@ -152,7 +152,7 @@ export default function Reports() {
       ${barcodeDataUrl ? `
         <div style="text-align:center; padding-right:10px;">
           <img src="${barcodeDataUrl}" style="height:55px;" />
-          <div style="font-size:9px; font-weight:bold; color:${hc}; margin-top:2px;">${barcodeCode}</div>
+       <div style="font-size:9px; font-weight:bold; color:${hc}; margin-top:2px;">${barcodeCode}</div>
         </div>
       ` : ''}
     </div>
