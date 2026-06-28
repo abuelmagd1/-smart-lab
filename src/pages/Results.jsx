@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
+import BarcodeLabel from '../components/BarcodeLabel'
 
 const statusStyle = {
-  'مكتمل': { bg: '#d1fae5', color: '#065f46' },
-  'معلق': { bg: '#fef3c7', color: '#92400e' },
+  'تم التجميع': { bg: '#f3f4f6', color: '#374151' },
+  'تم الاستلام': { bg: '#dbeafe', color: '#1e40af' },
+  'قيد التحليل': { bg: '#fef3c7', color: '#92400e' },
+  'معتمد': { bg: '#d1fae5', color: '#065f46' },
 }
+
+const SAMPLE_STAGES = ['تم التجميع', 'تم الاستلام', 'قيد التحليل', 'معتمد']
 
 const periodFilters = [
   { key: 'all', label: 'الكل' },
   { key: 'today', label: 'اليوم' },
-  { key: 'yesterday', label: 'الامس' },
+  { key: 'yesterday', label: 'امبارح' },
   { key: 'week', label: 'آخر أسبوع' },
   { key: 'month', label: 'آخر شهر' },
   { key: 'older', label: 'قبل ذلك' },
@@ -39,6 +44,7 @@ export default function Results() {
   const [selected, setSelected] = useState(null)
   const [resultInput, setResultInput] = useState({})
   const [editPatient, setEditPatient] = useState(null)
+  const [barcodePatient, setBarcodePatient] = useState(null)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [editTest, setEditTest] = useState(null)
 
@@ -246,6 +252,10 @@ export default function Results() {
         </div>
       )}
 
+      {barcodePatient && (
+        <BarcodeLabel patient={barcodePatient} onClose={() => setBarcodePatient(null)} />
+      )}
+
       {loading ? (
         <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>جاري التحميل...</div>
       ) : filtered.length === 0 ? (
@@ -268,8 +278,13 @@ export default function Results() {
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium px-2 py-1 rounded-full"
                     style={{ background: statusStyle[p.tests?.[0]?.status]?.bg || '#fef3c7', color: statusStyle[p.tests?.[0]?.status]?.color || '#92400e' }}>
-                    {p.tests?.[0]?.status || 'معلق'}
+                    {p.tests?.[0]?.status || 'تم التجميع'}
                   </span>
+                  <button onClick={e => { e.stopPropagation(); setBarcodePatient(p) }}
+                    className="px-3 py-1 rounded-lg text-xs font-medium"
+                    style={{ background: '#fef3c7', color: '#92400e' }}>
+                    🏷️ باركود
+                  </button>
                   <button onClick={e => { e.stopPropagation(); setEditPatient(p) }}
                     className="px-3 py-1 rounded-lg text-xs font-medium"
                     style={{ background: '#e8f0fe', color: 'var(--primary-container)' }}>
@@ -306,23 +321,31 @@ export default function Results() {
                           <td className="p-3 text-xs" style={{ color: 'var(--on-surface-variant)' }}>{t.normal_range || '-'}</td>
                           <td className="p-3">
                             <input type="text" defaultValue={t.value || ''}
-                              onChange={e => setResultInput(prev => ({ ...prev, [t.id]: e.target.value }))}
+                              onChange={e => setResultInput(prev => ({ ...prev, [t.id]: { ...prev[t.id], value: e.target.value } }))}
                               placeholder="أدخل النتيجة..."
                               className="px-3 py-1 rounded-lg outline-none text-right w-full"
                               style={{ border: '1px solid var(--outline-variant)', fontSize: '13px' }}
                             />
                           </td>
                           <td className="p-3">
-                            <span className="text-xs font-medium px-2 py-1 rounded-full"
-                              style={{ background: statusStyle[t.status]?.bg || statusStyle['معلق'].bg, color: statusStyle[t.status]?.color || statusStyle['معلق'].color }}>
-                              {t.status || 'معلق'}
-                            </span>
+                            <select defaultValue={t.status || 'تم التجميع'}
+                              onChange={e => setResultInput(prev => ({ ...prev, [t.id]: { ...prev[t.id], stage: e.target.value } }))}
+                              className="px-2 py-1 rounded-lg outline-none text-right text-xs font-medium"
+                              style={{
+                                background: statusStyle[t.status]?.bg || statusStyle['تم التجميع'].bg,
+                                color: statusStyle[t.status]?.color || statusStyle['تم التجميع'].color,
+                                border: '1px solid var(--outline-variant)'
+                              }}>
+                              {SAMPLE_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
                           </td>
                           <td className="p-3">
                             <div className="flex gap-1">
                               <button onClick={() => {
-                                const value = resultInput[t.id] ?? t.value ?? ''
-                                const status = value.trim() !== '' ? 'مكتمل' : 'معلق'
+                                const value = resultInput[t.id]?.value ?? t.value ?? ''
+                                const manualStage = resultInput[t.id]?.stage ?? t.status ?? 'تم التجميع'
+                                // أي قيمة متدخلة تعتمد المرحلة تلقائيًا لـ "معتمد"، وإلا تتبع المرحلة المختارة يدويًا
+                                const status = value.trim() !== '' ? 'معتمد' : (manualStage === 'معتمد' ? 'قيد التحليل' : manualStage)
                                 updateTest(t.id, value, status)
                               }}
                                 className="px-3 py-1 rounded-lg text-xs text-white font-medium"

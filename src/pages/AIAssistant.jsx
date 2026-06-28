@@ -522,7 +522,7 @@ ${roster || 'لا يوجد مرضى حاليًا'}
         const { data: catalog } = await supabase.from('test_catalog').select('*')
         const { matched, notFound } = matchTestsAgainstCatalog(args.tests, catalog)
 
-        const testsToInsert = matched.map(t => ({ patient_id: resolved.match.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'معلق' }))
+        const testsToInsert = matched.map(t => ({ patient_id: resolved.match.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'تم التجميع' }))
         await supabase.from('tests').insert(testsToInsert)
 
         let msg = `تم إضافة ${matched.length} تحليل للمريض "${resolved.match.name}"`
@@ -604,19 +604,21 @@ ${roster || 'لا يوجد مرضى حاليًا'}
     if (data.testNames?.length) {
       const { data: catalog } = await supabase.from('test_catalog').select('*')
       const { matched } = matchTestsAgainstCatalog(data.testNames, catalog)
-      const testsToInsert = matched.map(t => ({ patient_id: patient.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'معلق' }))
+      const testsToInsert = matched.map(t => ({ patient_id: patient.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'تم التجميع' }))
       const { error: testsError } = await supabase.from('tests').insert(testsToInsert)
       if (testsError) throw testsError
     }
   }
 
   const executeTestResult = async (data) => {
-    const status = data.value?.trim() ? 'مكتمل' : 'معلق'
     const patients = await getPatients()
     const patient = patients.find(p => p.id === data.patientId)
     const test = patient?.tests?.find(t => t.name?.toLowerCase() === data.testName?.toLowerCase())
       || patient?.tests?.find(t => t.name?.toLowerCase().includes(data.testName?.toLowerCase()))
     if (!test) throw new Error(`مش لاقي تحليل اسمه "${data.testName}" لدى المريض`)
+
+    // قيمة متدخلة = اعتماد تلقائي، وإلا تفضل المرحلة الحالية للتحليل زي ما هي
+    const status = data.value?.trim() ? 'معتمد' : (test.status || 'تم التجميع')
 
     const { error } = await supabase.from('tests').update({ value: data.value, status }).eq('id', test.id)
     if (error) throw error
@@ -967,4 +969,3 @@ function ConfirmCard({ pending, onConfirm, onCancel }) {
     </div>
   )
 }
-

@@ -3,8 +3,10 @@ import { useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
 
 const statusStyle = {
-  'مكتمل': { bg: '#d1fae5', color: '#065f46' },
-  'معلق': { bg: '#fef3c7', color: '#92400e' },
+  'تم التجميع': { bg: '#f3f4f6', color: '#374151' },
+  'تم الاستلام': { bg: '#dbeafe', color: '#1e40af' },
+  'قيد التحليل': { bg: '#fef3c7', color: '#92400e' },
+  'معتمد': { bg: '#d1fae5', color: '#065f46' },
 }
 
 const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
@@ -13,7 +15,7 @@ const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'م�
 const periodFilters = [
   { key: 'all', label: 'الكل' },
   { key: 'today', label: 'اليوم' },
-  { key: 'yesterday', label: 'الامس' },
+  { key: 'yesterday', label: 'امبارح' },
   { key: 'week', label: 'آخر أسبوع' },
   { key: 'month', label: 'آخر شهر' },
   { key: 'older', label: 'قبل ذلك' },
@@ -97,16 +99,17 @@ export default function Dashboard() {
   // الكروت الإحصائية فوق دايمًا بتعكس نتائج اليوم بس، مهما كان الفلتر المختار في الجدول تحت
   const todayPatients = patients.filter(p => getBucket(p.created_at) === 'today')
   const todayTests = todayPatients.flatMap(p => p.tests || [])
+  const inProgressStages = ['تم التجميع', 'تم الاستلام', 'قيد التحليل']
   const stats = {
     total: todayPatients.length,
-    pending: todayTests.filter(t => t.status === 'معلق').length,
-    done: todayTests.filter(t => t.status === 'مكتمل').length,
+    pending: todayTests.filter(t => inProgressStages.includes(t.status)).length,
+    done: todayTests.filter(t => t.status === 'معتمد').length,
   }
 
   const statCards = [
     { label: 'مرضى اليوم', value: stats.total, icon: '👥', color: '#1a73e8' },
-    { label: 'تحاليل معلقة اليوم', value: stats.pending, icon: '⏳', color: '#f59e0b' },
-    { label: 'تحاليل مكتملة اليوم', value: stats.done, icon: '✅', color: '#10b981' },
+    { label: 'تحاليل قيد التنفيذ اليوم', value: stats.pending, icon: '⏳', color: '#f59e0b' },
+    { label: 'تحاليل معتمدة اليوم', value: stats.done, icon: '✅', color: '#10b981' },
   ]
 
   return (
@@ -185,7 +188,7 @@ export default function Dashboard() {
                   <td className="p-3">
                     <span className="text-xs font-medium px-2 py-1 rounded-full"
                       style={{ background: statusStyle[p.tests?.[0]?.status]?.bg || '#fef3c7', color: statusStyle[p.tests?.[0]?.status]?.color || '#92400e' }}>
-                      {p.tests?.[0]?.status || 'معلق'}
+                      {p.tests?.[0]?.status || 'تم التجميع'}
                     </span>
                   </td>
                 </tr>

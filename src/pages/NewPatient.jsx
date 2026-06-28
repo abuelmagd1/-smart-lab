@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
+import BarcodeLabel from '../components/BarcodeLabel'
 
 export default function NewPatient() {
   const [form, setForm] = useState({ name: '', phone: '', age: '', birth_date: '', gender: '', doctor: '', notes: '' })
@@ -9,6 +10,8 @@ export default function NewPatient() {
   const [activeCategory, setActiveCategory] = useState('All')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
+  const [lastPatient, setLastPatient] = useState(null)
+  const [showBarcode, setShowBarcode] = useState(false)
 
   useEffect(() => { fetchTests() }, [])
 
@@ -57,7 +60,7 @@ export default function NewPatient() {
     if (error) { alert('حدث خطأ أثناء حفظ بيانات المريض: ' + error.message); setLoading(false); return }
 
     const { error: testsError } = await supabase.from('tests').insert(
-      selectedTests.map(t => ({ patient_id: patient.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'معلق' }))
+      selectedTests.map(t => ({ patient_id: patient.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'تم التجميع' }))
     )
 
     if (testsError) {
@@ -68,6 +71,7 @@ export default function NewPatient() {
 
     setLoading(false)
     setSuccess(true)
+    setLastPatient(patient)
     setForm({ name: '', phone: '', age: '', birth_date: '', gender: '', doctor: '', notes: '' })
     setSelectedTests([])
     setTimeout(() => setSuccess(false), 3000)
@@ -81,9 +85,20 @@ export default function NewPatient() {
       </div>
 
       {success && (
-        <div className="mb-4 p-4 rounded-xl text-sm font-medium" style={{ background: '#d1fae5', color: '#065f46' }}>
-          ✅ تم حفظ بيانات المريض بنجاح!
+        <div className="mb-4 p-4 rounded-xl text-sm font-medium flex items-center justify-between flex-wrap gap-3" style={{ background: '#d1fae5', color: '#065f46' }}>
+          <span>✅ تم حفظ بيانات المريض بنجاح!</span>
+          {lastPatient && (
+            <button onClick={() => setShowBarcode(true)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-white"
+              style={{ background: '#065f46' }}>
+              🏷️ طباعة باركود العينة
+            </button>
+          )}
         </div>
+      )}
+
+      {showBarcode && (
+        <BarcodeLabel patient={lastPatient} onClose={() => setShowBarcode(false)} />
       )}
 
       <div className="bg-white rounded-xl p-6 space-y-6" style={{ border: '1px solid var(--outline-variant)' }}>
