@@ -29,6 +29,7 @@ export default function Reports() {
     report_result_normal_color: '#000000',
     report_result_high_color: '#dc2626',
     report_result_low_color: '#2563eb',
+    report_barcode_color: '#1a2456',
   })
   const [savingDesign, setSavingDesign] = useState(false)
   const [designSaved, setDesignSaved] = useState(false)
@@ -67,6 +68,7 @@ export default function Reports() {
         report_result_normal_color: data.report_result_normal_color || '#000000',
         report_result_high_color: data.report_result_high_color || '#dc2626',
         report_result_low_color: data.report_result_low_color || '#2563eb',
+        report_barcode_color: data.report_barcode_color || '#1a2456',
       })
     }
   }
@@ -106,83 +108,84 @@ export default function Reports() {
     return 'طبيعي'
   }
 
- const printReport = () => {
-  if (!selectedPatient) return
+  const printReport = () => {
+    if (!selectedPatient) return
 
-  let barcodeDataUrl = ''
-  let barcodeCode = ''
-  try {
-    const canvas = barcodeCanvasRef.current
-    if (canvas && selectedPatient.barcode_seq) {
-      barcodeCode = getBarcodeCode(selectedPatient)
-      JsBarcode(canvas, barcodeCode, {
-        format: 'CODE128',
-        width: 1.5,
-        height: 35,
-        displayValue: true,
-        fontSize: 10,
-        margin: 3,
-      })
-      barcodeDataUrl = canvas.toDataURL('image/png')
-    }
-  } catch { }
+    let barcodeDataUrl = ''
+    let barcodeCode = ''
+    try {
+      const canvas = barcodeCanvasRef.current
+      if (canvas && selectedPatient.barcode_seq) {
+        barcodeCode = getBarcodeCode(selectedPatient)
+        JsBarcode(canvas, barcodeCode, {
+          format: 'CODE128',
+          width: 1.5,
+          height: 35,
+          displayValue: true,
+          fontSize: 10,
+          margin: 3,
+          lineColor: design.report_barcode_color,
+        })
+        barcodeDataUrl = canvas.toDataURL('image/png')
+      }
+    } catch { }
 
-  const printContents = previewRef.current.innerHTML
-  const genderText = selectedPatient.gender === 'ذكر' ? 'Male' : 'Female'
-  const printDate = new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  const visitDate = new Date(selectedPatient.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  const hc = design.report_header_color
+    const genderText = selectedPatient.gender === 'ذكر' ? 'Male' : 'Female'
+    const printDate = new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    const visitDate = new Date(selectedPatient.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    const hc = design.report_header_color
+    const bc = design.report_barcode_color
 
-  const patientInfoWithBarcode = `
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px 30px; flex:1;">
-        ${[
-          ['Patient Name :', selectedPatient.name],
-          ['Print Date :', printDate],
-          ['Sex / Age :', `${genderText} / ${selectedPatient.age || '-'} Years`],
-          ['Visit Date :', visitDate],
-          ['Referred By :', selectedPatient.doctor || '-'],
-        ].map(([label, value]) => `
-          <div style="display:flex; gap:5px; font-size:${fs}px;">
-            <span style="font-weight:bold; color:${hc}; white-space:nowrap;">${label}</span>
-            <span style="color:#333;">${value}</span>
-          </div>
-        `).join('')}
-      </div>
-      ${barcodeDataUrl ? `
-        <div style="text-align:center; padding-right:10px;">
-          <img src="${barcodeDataUrl}" style="height:55px;" />
-       
+    const patientInfoWithBarcode = `
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px 30px; flex:1;">
+          ${[
+            ['Patient Name :', selectedPatient.name],
+            ['Print Date :', printDate],
+            ['Sex / Age :', `${genderText} / ${selectedPatient.age || '-'} Years`],
+            ['Visit Date :', visitDate],
+            ['Referred By :', selectedPatient.doctor || '-'],
+          ].map(([label, value]) => `
+            <div style="display:flex; gap:5px; font-size:${fs}px;">
+              <span style="font-weight:bold; color:${hc}; white-space:nowrap;">${label}</span>
+              <span style="color:#333;">${value}</span>
+            </div>
+          `).join('')}
         </div>
-      ` : ''}
-    </div>
-  `
+        ${barcodeDataUrl ? `
+          <div style="text-align:center; padding-right:10px; border-right: 1px solid #eee; margin-right: 10px;">
+            <div style="font-size:9px; font-weight:bold; color:${bc}; margin-bottom:3px; letter-spacing:1px;">PATIENT ID</div>
+            <img src="${barcodeDataUrl}" style="height:50px; display:block; margin: 0 auto;" />
+          </div>
+        ` : ''}
+      </div>
+    `
 
-  // استبدل قسم بيانات المريض في الـ preview بالنسخة اللي فيها باركود
-  const modifiedContents = printContents.replace(
-    /<div style="margin-bottom: 12px;">[\s\S]*?<\/div>\s*<hr/,
-    patientInfoWithBarcode + '<hr'
-  )
+    const printContents = previewRef.current.innerHTML
+    const modifiedContents = printContents.replace(
+      /<div style="margin-bottom: 12px;">[\s\S]*?<\/div>\s*<hr/,
+      patientInfoWithBarcode + '<hr'
+    )
 
-  const win = window.open('', '_blank')
-  win.document.write(`
-    <html dir="ltr">
-    <head>
-      <title>Laboratory Report - ${selectedPatient.name}</title>
-      <meta charset="UTF-8">
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; padding: 20px 25px; background: white; font-size: ${fs}px; color: #000; }
-        .preview-container { max-width: 100%; }
-        @media print { @page { margin: 8mm; size: A4; } }
-      </style>
-    </head>
-    <body><div class="preview-container">${modifiedContents}</div></body>
-    </html>
-  `)
-  win.document.close()
-  setTimeout(() => win.print(), 800)
-}
+    const win = window.open('', '_blank')
+    win.document.write(`
+      <html dir="ltr">
+      <head>
+        <title>Laboratory Report - ${selectedPatient.name}</title>
+        <meta charset="UTF-8">
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: Arial, sans-serif; padding: 20px 25px; background: white; font-size: ${fs}px; color: #000; }
+          .preview-container { max-width: 100%; }
+          @media print { @page { margin: 8mm; size: A4; } }
+        </style>
+      </head>
+      <body><div class="preview-container">${modifiedContents}</div></body>
+      </html>
+    `)
+    win.document.close()
+    setTimeout(() => win.print(), 800)
+  }
 
   const PreviewReport = ({ patient }) => {
     if (!patient || !settings) return null
@@ -205,11 +208,12 @@ export default function Reports() {
     const rNormal = design.report_result_normal_color
     const rHigh = design.report_result_high_color
     const rLow = design.report_result_low_color
+    const bc = design.report_barcode_color
 
     return (
       <div style={{ fontFamily: 'Arial, sans-serif', fontSize: `${fs}px`, color: '#000', background: 'white', padding: '20px 25px' }}>
 
-        {/* Header فاضي - للطباعة على ورقة هيدر جاهزة */}
+        {/* Header فاضي */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', gap: '8mm', marginBottom: '6mm' }}>
           <div style={{ height: '90px' }}></div>
           <div style={{ height: '90px' }}></div>
@@ -223,9 +227,9 @@ export default function Reports() {
           Laboratory Report
         </div>
 
-        {/* Patient Info */}
-        <div style={{ marginBottom: '12px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px 30px' }}>
+        {/* Patient Info + Barcode Preview */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px 30px', flex: 1 }}>
             {[
               ['Patient Name :', patient.name],
               ['Print Date :', printDate],
@@ -239,6 +243,18 @@ export default function Reports() {
               </div>
             ))}
           </div>
+
+          {/* Barcode Preview */}
+          {patient.barcode_seq && (
+            <div style={{ textAlign: 'center', paddingRight: '10px', borderRight: `1px solid #eee`, marginRight: '10px' }}>
+              <div style={{ fontSize: '9px', fontWeight: 'bold', color: bc, marginBottom: '3px', letterSpacing: '1px' }}>PATIENT ID</div>
+              <div style={{ background: '#f8f9ff', border: `1px solid ${bc}30`, borderRadius: '6px', padding: '6px 10px' }}>
+                <div style={{ fontFamily: 'monospace', fontSize: '13px', fontWeight: 'bold', color: bc, letterSpacing: '2px' }}>
+                  {getBarcodeCode(patient)}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <hr style={{ border: 'none', borderTop: '1px solid #ccc', margin: '8px 0' }} />
@@ -304,7 +320,6 @@ export default function Reports() {
   return (
     <div className="p-6" dir="rtl">
 
-      {/* canvas مخفي لتوليد الباركود */}
       <canvas ref={barcodeCanvasRef} style={{ display: 'none' }} />
 
       <div className="mb-6">
@@ -384,6 +399,7 @@ export default function Reports() {
                 { label: 'لون النتيجة الطبيعية', key: 'report_result_normal_color' },
                 { label: 'لون النتيجة المرتفعة', key: 'report_result_high_color' },
                 { label: 'لون النتيجة المنخفضة', key: 'report_result_low_color' },
+                { label: 'لون الباركود والـ ID', key: 'report_barcode_color' },
               ].map(item => (
                 <div key={item.key} className="flex items-center justify-between gap-2">
                   <label className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>{item.label}</label>
@@ -434,4 +450,3 @@ export default function Reports() {
     </div>
   )
 }
-
