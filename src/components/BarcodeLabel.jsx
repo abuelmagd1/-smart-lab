@@ -57,27 +57,38 @@ const printLabel = () => {
 
   if (!patient) return null
 
-  return (
-    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.4)' }} dir="rtl">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
-        <h2 className="font-bold text-lg mb-1" style={{ color: 'var(--on-surface)' }}>باركود العينة</h2>
-        <p className="text-sm mb-4" style={{ color: 'var(--on-surface-variant)' }}>{patient.name}</p>
-        <div className="flex justify-center mb-4 overflow-x-auto">
-          <canvas ref={canvasRef} />
-        </div>
-        <div className="flex gap-2">
-          <button onClick={onClose}
-            className="flex-1 py-2 rounded-lg text-sm"
-            style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
-            إغلاق
-          </button>
-          <button onClick={printLabel}
-            className="flex-1 py-2 rounded-lg text-sm text-white font-medium"
-            style={{ background: 'var(--primary-container)' }}>
-            🖨️ طباعة
-          </button>
-        </div>
+ return (
+  <div 
+    className="fixed inset-0 flex items-center justify-center"
+    style={{ background: 'rgba(0,0,0,0.4)', zIndex: 9999 }}
+    onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    dir="rtl"
+  >
+    <div 
+      className="bg-white rounded-2xl p-6 w-full max-w-sm text-center"
+      style={{ zIndex: 10000, position: 'relative' }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <h2 className="font-bold text-lg mb-1" style={{ color: 'var(--on-surface)' }}>باركود العينة</h2>
+      <p className="text-sm mb-4" style={{ color: 'var(--on-surface-variant)' }}>{patient.name}</p>
+      <div className="flex justify-center mb-4 overflow-x-auto">
+        <canvas ref={canvasRef} />
+      </div>
+      <div className="flex gap-2">
+        <button 
+          onClick={onClose}
+          className="flex-1 py-2 rounded-lg text-sm"
+          style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+          إغلاق
+        </button>
+        <button 
+          onClick={printLabel}
+          className="flex-1 py-2 rounded-lg text-sm text-white font-medium"
+          style={{ background: 'var(--primary-container)' }}>
+          🖨️ طباعة
+        </button>
       </div>
     </div>
-  )
+  </div>
+)
 }
