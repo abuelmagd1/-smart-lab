@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef, Fragment } from 'react'
 import { useLocation } from 'react-router-dom'
 import { supabase } from '../supabase'
+import JsBarcode from 'jsbarcode'
+import { getBarcodeCode } from '../components/BarcodeLabel'
 
 const resultColor = {
   'طبيعي': { color: '#065f46', bg: '#d1fae5' },
@@ -31,10 +33,10 @@ export default function Reports() {
   const [savingDesign, setSavingDesign] = useState(false)
   const [designSaved, setDesignSaved] = useState(false)
   const previewRef = useRef(null)
+  const barcodeCanvasRef = useRef(null)
 
   useEffect(() => { fetchPatients(); fetchSettings() }, [])
 
-  // لو المساعد الذكي وجّهنا هنا بمريض معين (لطباعة تقريره)، نحدده تلقائيًا أول ما المرضى تتحمل
   useEffect(() => {
     const targetId = location.state?.autoSelectPatientId
     if (!loading && targetId && patients.length) {
@@ -80,7 +82,6 @@ export default function Reports() {
   }
 
   const filtered = patients.filter(p => p.name?.includes(search))
-
   const fs = parseInt(design.report_font_size) || 11
 
   const groupedTests = (patient) => {
@@ -93,18 +94,13 @@ export default function Reports() {
     return groups
   }
 
-  // تحسب حالة النتيجة (مرتفع / منخفض / طبيعي) تلقائيًا بمقارنة الرقم بالمعدل الطبيعي
-  // مثال: value = 130, range = "50-115" => 130 أعلى من 115 => 'مرتفع'
   const calcResultStatus = (value, range) => {
     const num = parseFloat(String(value).replace(',', '.'))
     if (isNaN(num) || !range) return null
-
     const matches = String(range).match(/-?\d+(\.\d+)?/g)
     if (!matches || matches.length < 2) return null
-
     const nums = matches.map(parseFloat).sort((a, b) => a - b)
     const [low, high] = nums
-
     if (num > high) return 'مرتفع'
     if (num < low) return 'منخفض'
     return 'طبيعي'
@@ -112,6 +108,26 @@ export default function Reports() {
 
   const printReport = () => {
     if (!selectedPatient) return
+
+    // توليد الباركود كصورة
+    let barcodeDataUrl = ''
+    let barcodeCode = ''
+    try {
+      const canvas = barcodeCanvasRef.current
+      if (canvas && selectedPatient.barcode_seq) {
+        barcodeCode = getBarcodeCode(selectedPatient)
+        JsBarcode(canvas, barcodeCode, {
+          format: 'CODE128',
+          width: 2,
+          height: 50,
+          displayValue: true,
+          fontSize: 12,
+          margin: 5,
+        })
+        barcodeDataUrl = canvas.toDataURL('image/png')
+      }
+    } catch { }
+
     const printContents = previewRef.current.innerHTML
     const win = window.open('', '_blank')
     win.document.write(`
@@ -123,10 +139,26 @@ export default function Reports() {
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: Arial, sans-serif; padding: 20px 25px; background: white; font-size: ${fs}px; color: #000; }
           .preview-container { max-width: 100%; }
+          .barcode-section { margin-top: 15px; padding-top: 12px; border-top: 1px solid #ddd; display: flex; align-items: center; gap: 15px; }
+          .barcode-section img { height: 60px; }
+          .barcode-info { font-size: ${fs}px; }
+          .barcode-info .label { font-weight: bold; color: ${design.report_header_color}; margin-bottom: 2px; }
+          .barcode-info .code { font-family: monospace; font-size: ${fs + 1}px; }
           @media print { @page { margin: 8mm; size: A4; } }
         </style>
       </head>
-      <body><div class="preview-container">${printContents}</div></body>
+      <body>
+        <div class="preview-container">${printContents}</div>
+        ${barcodeDataUrl ? `
+          <div class="barcode-section">
+            <img src="${barcodeDataUrl}" />
+            <div class="barcode-info">
+              <div class="label">Patient ID</div>
+              <div class="code">${barcodeCode}</div>
+            </div>
+          </div>
+        ` : ''}
+      </body>
       </html>
     `)
     win.document.close()
@@ -137,7 +169,6 @@ export default function Reports() {
     if (!patient || !settings) return null
 
     const doctorName = settings.doctor_name || 'اسم الطبيب'
-
     const printDate = new Date().toLocaleString('en-GB', {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit'
@@ -159,7 +190,7 @@ export default function Reports() {
     return (
       <div style={{ fontFamily: 'Arial, sans-serif', fontSize: `${fs}px`, color: '#000', background: 'white', padding: '20px 25px' }}>
 
-        {/* Header - فاضي عمدًا (يُطبع على ورقة هيدر جاهزة) */}
+        {/* Header فاضي - للطباعة على ورقة هيدر جاهزة */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', gap: '8mm', marginBottom: '6mm' }}>
           <div style={{ height: '90px' }}></div>
           <div style={{ height: '90px' }}></div>
@@ -173,7 +204,7 @@ export default function Reports() {
           Laboratory Report
         </div>
 
-        {/* Patient Info - بدون barcode */}
+        {/* Patient Info */}
         <div style={{ marginBottom: '12px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px 30px' }}>
             {[
@@ -219,16 +250,16 @@ export default function Reports() {
                 {tests.map((t, ti) => {
                   const computedStatus = calcResultStatus(t.value, t.normal_range) || t.status
                   return (
-                  <tr key={ti} style={{ background: ti % 2 === 0 ? 'white' : '#fafafa' }}>
-                    <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>■ {t.name}</td>
-                    <td style={{
-                      padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee',
-                      color: computedStatus === 'مرتفع' ? rHigh : computedStatus === 'منخفض' ? rLow : rNormal,
-                      fontWeight: (computedStatus === 'مرتفع' || computedStatus === 'منخفض') ? 'bold' : 'normal'
-                    }}>{t.value || '---'}</td>
-                    <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.unit || ''}</td>
-                    <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.normal_range || '---'}</td>
-                  </tr>
+                    <tr key={ti} style={{ background: ti % 2 === 0 ? 'white' : '#fafafa' }}>
+                      <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>■ {t.name}</td>
+                      <td style={{
+                        padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee',
+                        color: computedStatus === 'مرتفع' ? rHigh : computedStatus === 'منخفض' ? rLow : rNormal,
+                        fontWeight: (computedStatus === 'مرتفع' || computedStatus === 'منخفض') ? 'bold' : 'normal'
+                      }}>{t.value || '---'}</td>
+                      <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.unit || ''}</td>
+                      <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.normal_range || '---'}</td>
+                    </tr>
                   )
                 })}
               </Fragment>
@@ -253,6 +284,10 @@ export default function Reports() {
 
   return (
     <div className="p-6" dir="rtl">
+
+      {/* canvas مخفي لتوليد الباركود */}
+      <canvas ref={barcodeCanvasRef} style={{ display: 'none' }} />
+
       <div className="mb-6">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>التقارير</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>عرض وطباعة تقارير المرضى</p>
