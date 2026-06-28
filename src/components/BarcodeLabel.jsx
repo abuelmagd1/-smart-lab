@@ -20,36 +20,40 @@ export default function BarcodeLabel({ patient, onClose }) {
     }
   }, [patient])
 
-  const printLabel = () => {
-    if (!canvasRef.current || !patient) return
-    const dataUrl = canvasRef.current.toDataURL('image/png')
-    const win = window.open('', '_blank')
-    win.document.write(`
-      <html dir="rtl">
-      <head>
-        <title>باركود العينة - ${patient.name}</title>
-        <meta charset="UTF-8">
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 15px; }
-          .label { text-align: center; border: 1px solid #000; padding: 10px; width: 280px; }
-          .label img { width: 100%; }
-          .label p { margin: 4px 0; font-size: 13px; }
-          @media print { @page { margin: 5mm; size: 60mm 40mm; } }
-        </style>
-      </head>
-      <body>
-        <div class="label">
-          <p><strong>${patient.name}</strong></p>
-          <p>${patient.age} سنة • ${patient.gender}</p>
-          <img src="${dataUrl}" />
-        </div>
-      </body>
-      </html>
-    `)
-    win.document.close()
-    setTimeout(() => win.print(), 500)
-  }
+const printLabel = () => {
+  if (!canvasRef.current || !patient) return
+  const dataUrl = canvasRef.current.toDataURL('image/png')
+  const win = window.open('', '_blank')
+  win.document.write(`
+    <html dir="rtl">
+    <head>
+      <title>باركود العينة - ${patient.name}</title>
+      <meta charset="UTF-8">
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 80mm; height: 40mm; overflow: hidden; }
+        body { font-family: Arial, sans-serif; display: flex; align-items: center; justify-content: center; }
+        .label { text-align: center; border: 1px solid #000; padding: 4px 8px; width: 78mm; height: 38mm; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .label img { width: 70mm; height: 20mm; object-fit: contain; }
+        .label p { margin: 2px 0; font-size: 11px; line-height: 1.3; }
+        @media print {
+          @page { margin: 0; size: 80mm 40mm; }
+          html, body { width: 80mm; height: 40mm; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="label">
+        <p><strong>${patient.name}</strong></p>
+        <p>${patient.age} سنة • ${patient.gender}</p>
+        <img src="${dataUrl}" />
+      </div>
+    </body>
+    </html>
+  `)
+  win.document.close()
+  setTimeout(() => win.print(), 500)
+}
 
   if (!patient) return null
 
