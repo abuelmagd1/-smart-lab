@@ -106,64 +106,83 @@ export default function Reports() {
     return 'طبيعي'
   }
 
-  const printReport = () => {
-    if (!selectedPatient) return
+ const printReport = () => {
+  if (!selectedPatient) return
 
-    // توليد الباركود كصورة
-    let barcodeDataUrl = ''
-    let barcodeCode = ''
-    try {
-      const canvas = barcodeCanvasRef.current
-      if (canvas && selectedPatient.barcode_seq) {
-        barcodeCode = getBarcodeCode(selectedPatient)
-        JsBarcode(canvas, barcodeCode, {
-          format: 'CODE128',
-          width: 2,
-          height: 50,
-          displayValue: true,
-          fontSize: 12,
-          margin: 5,
-        })
-        barcodeDataUrl = canvas.toDataURL('image/png')
-      }
-    } catch { }
+  let barcodeDataUrl = ''
+  let barcodeCode = ''
+  try {
+    const canvas = barcodeCanvasRef.current
+    if (canvas && selectedPatient.barcode_seq) {
+      barcodeCode = getBarcodeCode(selectedPatient)
+      JsBarcode(canvas, barcodeCode, {
+        format: 'CODE128',
+        width: 1.5,
+        height: 35,
+        displayValue: true,
+        fontSize: 10,
+        margin: 3,
+      })
+      barcodeDataUrl = canvas.toDataURL('image/png')
+    }
+  } catch { }
 
-    const printContents = previewRef.current.innerHTML
-    const win = window.open('', '_blank')
-    win.document.write(`
-      <html dir="ltr">
-      <head>
-        <title>Laboratory Report - ${selectedPatient.name}</title>
-        <meta charset="UTF-8">
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; padding: 20px 25px; background: white; font-size: ${fs}px; color: #000; }
-          .preview-container { max-width: 100%; }
-          .barcode-section { margin-top: 15px; padding-top: 12px; border-top: 1px solid #ddd; display: flex; align-items: center; gap: 15px; }
-          .barcode-section img { height: 60px; }
-          .barcode-info { font-size: ${fs}px; }
-          .barcode-info .label { font-weight: bold; color: ${design.report_header_color}; margin-bottom: 2px; }
-          .barcode-info .code { font-family: monospace; font-size: ${fs + 1}px; }
-          @media print { @page { margin: 8mm; size: A4; } }
-        </style>
-      </head>
-      <body>
-        <div class="preview-container">${printContents}</div>
-        ${barcodeDataUrl ? `
-          <div class="barcode-section">
-            <img src="${barcodeDataUrl}" />
-            <div class="barcode-info">
-              <div class="label">Patient ID</div>
-              <div class="code">${barcodeCode}</div>
-            </div>
+  const printContents = previewRef.current.innerHTML
+  const genderText = selectedPatient.gender === 'ذكر' ? 'Male' : 'Female'
+  const printDate = new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const visitDate = new Date(selectedPatient.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const hc = design.report_header_color
+
+  const patientInfoWithBarcode = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px 30px; flex:1;">
+        ${[
+          ['Patient Name :', selectedPatient.name],
+          ['Print Date :', printDate],
+          ['Sex / Age :', `${genderText} / ${selectedPatient.age || '-'} Years`],
+          ['Visit Date :', visitDate],
+          ['Referred By :', selectedPatient.doctor || '-'],
+        ].map(([label, value]) => `
+          <div style="display:flex; gap:5px; font-size:${fs}px;">
+            <span style="font-weight:bold; color:${hc}; white-space:nowrap;">${label}</span>
+            <span style="color:#333;">${value}</span>
           </div>
-        ` : ''}
-      </body>
-      </html>
-    `)
-    win.document.close()
-    setTimeout(() => win.print(), 800)
-  }
+        `).join('')}
+      </div>
+      ${barcodeDataUrl ? `
+        <div style="text-align:center; padding-right:10px;">
+          <img src="${barcodeDataUrl}" style="height:55px;" />
+          <div style="font-size:9px; font-weight:bold; color:${hc}; margin-top:2px;">ID: ${barcodeCode}</div>
+        </div>
+      ` : ''}
+    </div>
+  `
+
+  // استبدل قسم بيانات المريض في الـ preview بالنسخة اللي فيها باركود
+  const modifiedContents = printContents.replace(
+    /<div style="margin-bottom: 12px;">[\s\S]*?<\/div>\s*<hr/,
+    patientInfoWithBarcode + '<hr'
+  )
+
+  const win = window.open('', '_blank')
+  win.document.write(`
+    <html dir="ltr">
+    <head>
+      <title>Laboratory Report - ${selectedPatient.name}</title>
+      <meta charset="UTF-8">
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; padding: 20px 25px; background: white; font-size: ${fs}px; color: #000; }
+        .preview-container { max-width: 100%; }
+        @media print { @page { margin: 8mm; size: A4; } }
+      </style>
+    </head>
+    <body><div class="preview-container">${modifiedContents}</div></body>
+    </html>
+  `)
+  win.document.close()
+  setTimeout(() => win.print(), 800)
+}
 
   const PreviewReport = ({ patient }) => {
     if (!patient || !settings) return null
