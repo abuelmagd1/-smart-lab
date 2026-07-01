@@ -9,6 +9,8 @@ export default function AdminDashboard() {
   const [search, setSearch] = useState('')
   const [newLogoFile, setNewLogoFile] = useState(null)
   const [newLogoPreview, setNewLogoPreview] = useState(null)
+  const [copiedId, setCopiedId] = useState(null)
+  const [togglingId, setTogglingId] = useState(null)
 
   useEffect(() => { fetchLabs() }, [])
 
@@ -106,10 +108,27 @@ export default function AdminDashboard() {
     fetchLabs()
   }
 
+  // نسخ كود التفعيل بضغطة واحدة، مع تلميح بصري مؤقت إن النسخ نجح
+  const copyActivationCode = (lab) => {
+    if (!lab.activation_code) return
+    navigator.clipboard?.writeText(lab.activation_code)
+    setCopiedId(lab.id)
+    setTimeout(() => setCopiedId(null), 1500)
+  }
+
+  // تفعيل/إيقاف المعمل بدون حذف الكود — لو عميل بيتأخر في السداد مثلاً، توقفه من هنا بدل الحذف النهائي
+  const toggleActive = async (lab) => {
+    setTogglingId(lab.id)
+    await supabase.from('lab_settings').update({ is_active: !lab.is_active }).eq('id', lab.id)
+    await fetchLabs()
+    setTogglingId(null)
+  }
+
   const filtered = labs.filter(l =>
     (l.lab_name || '').includes(search) ||
     (l.owner_name || '').includes(search) ||
-    (l.doctor_name || '').includes(search)
+    (l.doctor_name || '').includes(search) ||
+    (l.activation_code || '').toLowerCase().includes(search.toLowerCase())
   )
 
   return (
@@ -125,9 +144,14 @@ export default function AdminDashboard() {
           <div className="text-2xl font-bold" style={{ color: '#1a2456' }}>{labs.length}</div>
           <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>إجمالي المعامل</div>
         </div>
+        <div className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+          <div className="text-2xl mb-2">🔌</div>
+          <div className="text-2xl font-bold" style={{ color: '#065f46' }}>{labs.filter(l => l.is_active !== false).length}</div>
+          <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>معامل مفعّلة</div>
+        </div>
       </div>
 
-      <input type="text" placeholder="ابحث عن معمل أو دكتور..." value={search}
+      <input type="text" placeholder="ابحث عن معمل أو دكتور أو كود تفعيل..." value={search}
         onChange={e => setSearch(e.target.value)}
         className="w-full px-4 py-2 rounded-lg outline-none text-right mb-4"
         style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
@@ -206,6 +230,7 @@ export default function AdminDashboard() {
             </p>
             <p className="text-xs mb-5" style={{ color: '#92400e', background: '#fef3c7', padding: '8px', borderRadius: '8px' }}>
               ملحوظة: حساب الدكتور لتسجيل الدخول هيفضل موجود في Authentication، لازم تمسحه يدويًا من Supabase لو عاوز تقفله نهائي.
+              لو محتاج توقف المعمل مؤقتًا بدل الحذف النهائي، استخدم سويتش "مفعّل" في الكارت بدل الحذف.
             </p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setDeleteConfirm(null)}
@@ -230,32 +255,67 @@ export default function AdminDashboard() {
       ) : (
         <div className="space-y-3">
           {filtered.map(lab => (
-            <div key={lab.id} className="bg-white rounded-xl p-4 flex items-center justify-between" style={{ border: '1px solid var(--outline-variant)' }}>
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 text-2xl" style={{ background: '#f1f3f4' }}>
-                  {lab.logo_url ? <img src={lab.logo_url} alt="logo" className="w-full h-full object-cover" /> : '🔬'}
+            <div key={lab.id} className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 text-2xl" style={{ background: '#f1f3f4' }}>
+                    {lab.logo_url ? <img src={lab.logo_url} alt="logo" className="w-full h-full object-cover" /> : '🔬'}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold" style={{ color: 'var(--on-surface)' }}>{lab.lab_name || 'بدون اسم'}</p>
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full"
+                        style={{
+                          background: lab.is_active !== false ? '#d1fae5' : '#fee2e2',
+                          color: lab.is_active !== false ? '#065f46' : '#dc2626'
+                        }}>
+                        {lab.is_active !== false ? 'مفعّل' : 'موقوف'}
+                      </span>
+                    </div>
+                    <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
+                      {lab.doctor_name || lab.owner_name || '-'} • {lab.email}
+                    </p>
+                    <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)' }}>
+                      📍 {lab.address || '-'} • 📞 {lab.phone || '-'}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-semibold" style={{ color: 'var(--on-surface)' }}>{lab.lab_name || 'بدون اسم'}</p>
-                  <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
-                    {lab.doctor_name || lab.owner_name || '-'} • {lab.email}
-                  </p>
-                  <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)' }}>
-                    📍 {lab.address || '-'} • 📞 {lab.phone || '-'}
-                  </p>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={() => toggleActive(lab)} disabled={togglingId === lab.id}
+                    className="px-4 py-2 rounded-lg text-sm font-medium"
+                    style={{
+                      background: lab.is_active !== false ? '#fef3c7' : '#d1fae5',
+                      color: lab.is_active !== false ? '#92400e' : '#065f46',
+                      opacity: togglingId === lab.id ? 0.6 : 1
+                    }}>
+                    {lab.is_active !== false ? '⏸️ إيقاف' : '▶️ تفعيل'}
+                  </button>
+                  <button onClick={() => openEdit(lab)}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-white"
+                    style={{ background: '#1a2456' }}>
+                    ✏️ تعديل
+                  </button>
+                  <button onClick={() => setDeleteConfirm(lab)}
+                    className="px-4 py-2 rounded-lg text-sm font-medium"
+                    style={{ background: '#fee2e2', color: '#dc2626' }}>
+                    🗑️ حذف
+                  </button>
                 </div>
               </div>
-              <div className="flex gap-2 flex-shrink-0">
-                <button onClick={() => openEdit(lab)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-                  style={{ background: '#1a2456' }}>
-                  ✏️ تعديل
-                </button>
-                <button onClick={() => setDeleteConfirm(lab)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium"
-                  style={{ background: '#fee2e2', color: '#dc2626' }}>
-                  🗑️ حذف
-                </button>
+
+              {/* كود التفعيل الخاص بـ lab-bridge */}
+              <div className="mt-3 pt-3 flex items-center gap-2 flex-wrap" style={{ borderTop: '1px dashed var(--outline-variant)' }}>
+                <span className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>🔑 كود تفعيل Lab Bridge:</span>
+                <code className="text-xs font-mono px-2 py-1 rounded-lg" style={{ background: '#f1f3f4', color: 'var(--on-surface)' }}>
+                  {lab.activation_code || 'غير متوفر'}
+                </code>
+                {lab.activation_code && (
+                  <button onClick={() => copyActivationCode(lab)}
+                    className="text-xs font-medium px-2 py-1 rounded-lg"
+                    style={{ background: '#e8eaf6', color: '#1a2456' }}>
+                    {copiedId === lab.id ? '✅ اتنسخ' : '📋 نسخ'}
+                  </button>
+                )}
               </div>
             </div>
           ))}
