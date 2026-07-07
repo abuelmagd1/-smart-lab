@@ -266,10 +266,21 @@ export default function Results() {
         <div className="space-y-4">
           {filtered.map(p => (
             <div key={p.id} className="bg-white rounded-xl" style={{ border: '1px solid var(--outline-variant)' }}>
-              <div className="flex items-center justify-between p-4 cursor-pointer"
-                style={{ borderBottom: selected?.id === p.id ? '1px solid var(--outline-variant)' : 'none' }}
-                onClick={() => setSelected(selected?.id === p.id ? null : p)}>
-                <div>
+              <div className="flex items-center justify-between p-4"
+                style={{ borderBottom: selected?.id === p.id ? '1px solid var(--outline-variant)' : 'none' }}>
+                <div
+                  className="flex-1 cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={selected?.id === p.id}
+                  aria-label={`عرض تفاصيل ${p.name}`}
+                  onClick={() => setSelected(selected?.id === p.id ? null : p)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setSelected(selected?.id === p.id ? null : p)
+                    }
+                  }}>
                   <p className="font-semibold" style={{ color: 'var(--on-surface)' }}>{p.name}</p>
                   <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
                     {p.age} سنة • {p.doctor} • {p.tests?.length} تحليل

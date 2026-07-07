@@ -38,8 +38,12 @@ export default function Layout() {
   const chatHistoryRef = useRef([])
 
   const [settings, setSettings] = useState(() => {
-    const saved = localStorage.getItem('appSettings')
-    return saved ? JSON.parse(saved) : { fontSize: 'medium', timeFormat: '12' }
+    try {
+      const saved = localStorage.getItem('appSettings')
+      return saved ? JSON.parse(saved) : { fontSize: 'medium', timeFormat: '12' }
+    } catch {
+      return { fontSize: 'medium', timeFormat: '12' }
+    }
   })
 
   useEffect(() => {
@@ -61,8 +65,13 @@ export default function Layout() {
 
   const getUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      setUser(null)
+      return
+    }
+
     setUser(user)
-    const { data } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).single()
+    const { data } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).maybeSingle()
     if (data) {
       const profile = {
         labName: data.lab_name || 'نظام إدارة المعامل الطبية',
@@ -125,8 +134,12 @@ export default function Layout() {
 
   const saveProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      setMsg({ text: 'يجب تسجيل الدخول أولاً', type: 'error' })
+      return
+    }
 
-    const { data: existing } = await supabase.from('lab_settings').select('id').eq('user_id', user.id).single()
+    const { data: existing } = await supabase.from('lab_settings').select('id').eq('user_id', user.id).maybeSingle()
     const payload = {
       lab_name: editData.labName,
       doctor_name: editData.doctorName,
@@ -216,7 +229,7 @@ export default function Layout() {
 
         <div className="p-4" style={{ borderTop: '1px solid var(--outline-variant)' }}>
           <div className="flex items-center gap-2">
-            <button onClick={() => { setShowProfile(true); setShowNotifications(false); setShowSettings(false); setEditMode(false); setShowPasswordSection(false); setMsg({ text: '', type: '' }) }}
+            <button onClick={() => { setShowProfile(true); setShowNotifications(false); setShowSettings(false); setEditMode(false); setShowPasswordSection(false); setMsg({ text: '', type: '' }) }} aria-label="فتح الملف الشخصي"
               className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
               style={{ background: 'var(--primary-container)' }}>
               أ
@@ -241,7 +254,7 @@ export default function Layout() {
 
             {/* الإشعارات - الإدمن فقط */}
             <div className="relative">
-              <button onClick={toggleNotifications} className="text-xl relative">
+              <button onClick={toggleNotifications} className="text-xl relative" aria-label="فتح الإشعارات">
                 🔔
                 {totalBadge > 0 && (
                   <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-white flex items-center justify-center"
@@ -274,7 +287,7 @@ export default function Layout() {
 
             {/* الإعدادات */}
             <div className="relative">
-              <button onClick={() => { setShowSettings(!showSettings); setShowNotifications(false); setShowProfile(false) }} className="text-xl">⚙️</button>
+              <button onClick={() => { setShowSettings(!showSettings); setShowNotifications(false); setShowProfile(false) }} className="text-xl" aria-label="فتح الإعدادات">⚙️</button>
               {showSettings && (
                 <div className="absolute left-0 top-10 bg-white rounded-xl shadow-xl z-50 w-72" style={{ border: '1px solid var(--outline-variant)' }} dir="rtl">
                   <div className="p-4" style={{ borderBottom: '1px solid var(--outline-variant)' }}>

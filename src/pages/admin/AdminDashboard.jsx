@@ -151,7 +151,8 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <input type="text" placeholder="ابحث عن معمل أو دكتور أو كود تفعيل..." value={search}
+      <label htmlFor="lab-search" className="sr-only">البحث عن معمل أو دكتور أو كود تفعيل</label>
+      <input id="lab-search" type="text" placeholder="ابحث عن معمل أو دكتور أو كود تفعيل..." value={search}
         onChange={e => setSearch(e.target.value)}
         className="w-full px-4 py-2 rounded-lg outline-none text-right mb-4"
         style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}

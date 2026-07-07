@@ -75,8 +75,8 @@ export default function AdminNotifications() {
 
       <div className="bg-white rounded-xl p-6 space-y-4 mb-6" style={{ border: '1px solid var(--outline-variant)' }}>
         <div>
-          <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>المستلم</label>
-          <select value={form.target} onChange={e => setForm(p => ({ ...p, target: e.target.value }))}
+          <label htmlFor="target" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>المستلم</label>
+          <select id="target" value={form.target} onChange={e => setForm(p => ({ ...p, target: e.target.value }))}
             className="w-full px-4 py-3 rounded-lg outline-none text-right"
             style={{ border: '1px solid var(--outline-variant)', fontSize: '14px', background: 'white' }}>
             <option value="all">📢 كل الدكاترة</option>
@@ -89,8 +89,8 @@ export default function AdminNotifications() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>عنوان الإشعار</label>
-          <input type="text" value={form.title} placeholder="مثال: تحديث جديد في النظام"
+          <label htmlFor="title" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>عنوان الإشعار</label>
+          <input id="title" type="text" value={form.title} placeholder="مثال: تحديث جديد في النظام"
             onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
             className="w-full px-4 py-3 rounded-lg outline-none text-right"
             style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
@@ -98,8 +98,8 @@ export default function AdminNotifications() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>نص الرسالة</label>
-          <textarea rows={3} value={form.message} placeholder="اكتب الرسالة هنا..."
+          <label htmlFor="message" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>نص الرسالة</label>
+          <textarea id="message" rows={3} value={form.message} placeholder="اكتب الرسالة هنا..."
             onChange={e => setForm(p => ({ ...p, message: e.target.value }))}
             className="w-full px-4 py-3 rounded-lg outline-none text-right resize-none"
             style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}

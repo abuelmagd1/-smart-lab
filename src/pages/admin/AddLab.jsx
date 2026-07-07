@@ -178,16 +178,16 @@ export default function AddLab() {
           <h2 className="font-semibold mb-4" style={{ color: 'var(--on-surface)' }}>بيانات تسجيل الدخول</h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>البريد الإلكتروني *</label>
-              <input type="email" value={form.email} placeholder="doctor@lab.com"
+              <label htmlFor="lab-email" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>البريد الإلكتروني *</label>
+              <input id="lab-email" type="email" value={form.email} placeholder="doctor@lab.com"
                 onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
                 className="w-full px-4 py-3 rounded-lg outline-none text-right"
                 style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>كلمة المرور *</label>
-              <input type="password" value={form.password} placeholder="••••••••"
+              <label htmlFor="lab-password" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>كلمة المرور *</label>
+              <input id="lab-password" type="password" value={form.password} placeholder="••••••••"
                 onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
                 className="w-full px-4 py-3 rounded-lg outline-none text-right"
                 style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
@@ -209,8 +209,8 @@ export default function AddLab() {
               { label: 'المؤهل الدراسي', key: 'qualification', placeholder: 'بكالوريوس علوم' },
             ].map(f => (
               <div key={f.key}>
-                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>{f.label}</label>
-                <input type="text" value={form[f.key]} placeholder={f.placeholder}
+                <label htmlFor={f.key} className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>{f.label}</label>
+                <input id={f.key} type="text" value={form[f.key]} placeholder={f.placeholder}
                   onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
                   className="w-full px-4 py-3 rounded-lg outline-none text-right"
                   style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}

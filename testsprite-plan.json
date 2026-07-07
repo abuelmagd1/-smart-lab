@@ -1,0 +1,14 @@
+﻿{
+  "projectId": "fb741d03-9ea5-48d8-9d41-a3048d9e6fdc",
+  "type": "frontend",
+  "name": "Login page renders and accepts user credentials",
+  "description": "Verify that the login page displays its auth form and allows a user to submit credentials without blocking the flow.",
+  "priority": "p1",
+  "planSteps": [
+    { "type": "action", "description": "Open the login page" },
+    { "type": "assertion", "description": "Verify the login form is visible with the email and password fields and a submit button" },
+    { "type": "action", "description": "Enter a valid email address and password into the login form" },
+    { "type": "action", "description": "Submit the login form" },
+    { "type": "assertion", "description": "Verify that the app proceeds past the login form to the dashboard experience or shows a clear authentication result" }
+  ]
+}

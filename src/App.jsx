@@ -1,17 +1,18 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import NewPatient from './pages/NewPatient'
-import Results from './pages/Results'
-import AIAssistant from './pages/AIAssistant'
-import Reports from './pages/Reports'
-import Layout from './components/Layout'
-import AdminLayout from './components/AdminLayout'
-import AdminDashboard from './pages/admin/AdminDashboard'
-import AddLab from './pages/admin/AddLab'
-import AdminNotifications from './pages/admin/AdminNotifications'
+
+const Login = lazy(() => import('./pages/Login'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const NewPatient = lazy(() => import('./pages/NewPatient'))
+const Results = lazy(() => import('./pages/Results'))
+const AIAssistant = lazy(() => import('./pages/AIAssistant'))
+const Reports = lazy(() => import('./pages/Reports'))
+const Layout = lazy(() => import('./components/Layout'))
+const AdminLayout = lazy(() => import('./components/AdminLayout'))
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
+const AddLab = lazy(() => import('./pages/admin/AddLab'))
+const AdminNotifications = lazy(() => import('./pages/admin/AdminNotifications'))
 
 function App() {
   const [session, setSession] = useState(undefined)
@@ -38,30 +39,46 @@ function App() {
     setRole(data?.role || 'doctor')
   }
 
-  if (session === undefined || (session && role === null)) return null
+  if (session === undefined) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" dir="rtl">
+        <div className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>جارٍ التحميل...</div>
+      </div>
+    )
+  }
+
+  if (session && role === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" dir="rtl">
+        <div className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>جارٍ تجهيز الحساب...</div>
+      </div>
+    )
+  }
 
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={!session ? <Login /> : <Navigate to={role === 'admin' ? '/admin' : '/dashboard'} />} />
-        <Route path="/" element={<Navigate to={!session ? '/login' : role === 'admin' ? '/admin' : '/dashboard'} />} />
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center" dir="rtl"><div className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>جارٍ تحميل الصفحة...</div></div>}>
+        <Routes>
+          <Route path="/login" element={!session ? <Login /> : <Navigate to={role === 'admin' ? '/admin' : '/dashboard'} />} />
+          <Route path="/" element={<Navigate to={!session ? '/login' : role === 'admin' ? '/admin' : '/dashboard'} />} />
 
-        {/* مسارات الدكتور */}
-        <Route element={session && role === 'doctor' ? <Layout /> : <Navigate to="/login" />}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/new-patient" element={<NewPatient />} />
-          <Route path="/results" element={<Results />} />
-          <Route path="/ai-assistant" element={<AIAssistant />} />
-          <Route path="/reports" element={<Reports />} />
-        </Route>
+          {/* مسارات الدكتور */}
+          <Route element={session && role === 'doctor' ? <Layout /> : <Navigate to="/login" />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/new-patient" element={<NewPatient />} />
+            <Route path="/results" element={<Results />} />
+            <Route path="/ai-assistant" element={<AIAssistant />} />
+            <Route path="/reports" element={<Reports />} />
+          </Route>
 
-        {/* مسارات الأدمن */}
-        <Route element={session && role === 'admin' ? <AdminLayout /> : <Navigate to="/login" />}>
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/add-lab" element={<AddLab />} />
-          <Route path="/admin/notifications" element={<AdminNotifications />} />
-        </Route>
-      </Routes>
+          {/* مسارات الأدمن */}
+          <Route element={session && role === 'admin' ? <AdminLayout /> : <Navigate to="/login" />}>
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/add-lab" element={<AddLab />} />
+            <Route path="/admin/notifications" element={<AdminNotifications />} />
+          </Route>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   )
 }

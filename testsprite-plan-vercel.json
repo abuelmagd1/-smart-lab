@@ -1,0 +1,12 @@
+﻿{
+  "projectId": "fb741d03-9ea5-48d8-9d41-a3048d9e6fdc",
+  "type": "frontend",
+  "name": "Login page loads with auth form",
+  "description": "Verify that the deployed login page is reachable and displays the authentication form controls.",
+  "priority": "p1",
+  "planSteps": [
+    { "type": "action", "description": "Open the deployed login page" },
+    { "type": "assertion", "description": "Verify the Smart Lab System login page heading is visible" },
+    { "type": "assertion", "description": "Verify the email field, password field, and login button are visible" }
+  ]
+}

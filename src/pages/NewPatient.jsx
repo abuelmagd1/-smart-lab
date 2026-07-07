@@ -115,8 +115,8 @@ export default function NewPatient() {
               { label: 'اسم الدكتور', key: 'doctor', type: 'text', placeholder: 'د. محمد أحمد' },
             ].map(field => (
               <div key={field.key}>
-                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>{field.label}</label>
-                <input type={field.type} placeholder={field.placeholder} value={form[field.key]}
+                <label htmlFor={field.key} className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>{field.label}</label>
+                <input id={field.key} type={field.type} placeholder={field.placeholder} value={form[field.key]}
                   onChange={e => setForm(prev => ({ ...prev, [field.key]: e.target.value }))}
                   className="w-full px-4 py-3 rounded-lg outline-none text-right"
                   style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
@@ -126,8 +126,8 @@ export default function NewPatient() {
               </div>
             ))}
             <div>
-              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>النوع</label>
-              <select value={form.gender} onChange={e => setForm(prev => ({ ...prev, gender: e.target.value }))}
+              <label htmlFor="gender" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>النوع</label>
+              <select id="gender" value={form.gender} onChange={e => setForm(prev => ({ ...prev, gender: e.target.value }))}
                 className="w-full px-4 py-3 rounded-lg outline-none text-right"
                 style={{ border: '1px solid var(--outline-variant)', fontSize: '14px', background: 'white' }}>
                 <option value="">اختر...</option>
@@ -176,27 +176,30 @@ export default function NewPatient() {
 
           {/* قائمة التحاليل */}
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3 max-h-64 overflow-y-auto">
-            {filtered.map(test => (
-              <label key={test.id} onClick={() => toggleTest(test)}
-                className="flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all"
-                style={{
-                  border: `1px solid ${selectedTests.find(t => t.id === test.id) ? 'var(--primary-container)' : 'var(--outline-variant)'}`,
-                  background: selectedTests.find(t => t.id === test.id) ? '#e8f0fe' : 'white'
-                }}>
-                <input type="checkbox" checked={!!selectedTests.find(t => t.id === test.id)} onChange={() => {}} className="w-3 h-3 accent-blue-600" />
-                <div>
-                  <p className="text-xs font-medium" style={{ color: 'var(--on-surface)' }}>{test.name}</p>
-                  <p className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>{test.unit}</p>
-                </div>
-              </label>
-            ))}
+            {filtered.map(test => {
+              const isSelected = !!selectedTests.find(t => t.id === test.id)
+              return (
+                <label key={test.id} onClick={() => toggleTest(test)}
+                  className="flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all"
+                  style={{
+                    border: `1px solid ${isSelected ? 'var(--primary-container)' : 'var(--outline-variant)'}`,
+                    background: isSelected ? '#e8f0fe' : 'white'
+                  }}>
+                  <input type="checkbox" checked={isSelected} onChange={() => toggleTest(test)} className="w-3 h-3 accent-blue-600" />
+                    <div>
+                    <p className="text-xs font-medium" style={{ color: 'var(--on-surface)' }}>{test.name}</p>
+                    <p className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>{test.unit}</p>
+                  </div>
+                </label>
+              )
+            })}
           </div>
         </div>
 
         {/* ملاحظات */}
         <div style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '1.5rem' }}>
-          <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>ملاحظات</label>
-          <textarea rows={3} placeholder="أي ملاحظات إضافية..." value={form.notes}
+          <label htmlFor="notes" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>ملاحظات</label>
+          <textarea id="notes" rows={3} placeholder="أي ملاحظات إضافية..." value={form.notes}
             onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))}
             className="w-full px-4 py-3 rounded-lg outline-none text-right resize-none"
             style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}

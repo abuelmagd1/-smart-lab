@@ -103,7 +103,7 @@ export default function Login() {
 
             {/* Error */}
             {error && (
-              <div className="mb-5 flex items-center gap-3 p-4 rounded-2xl text-sm"
+              <div role="alert" aria-live="polite" className="mb-5 flex items-center gap-3 p-4 rounded-2xl text-sm"
                 style={{ background: 'linear-gradient(135deg, #fee2e2, #fecaca)', border: '1px solid #fca5a5', color: '#991b1b' }}>
                 <svg className="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-.75-4.75a.75.75 0 001.5 0v-4.5a.75.75 0 00-1.5 0v4.5zm.75-7.5a1 1 0 110 2 1 1 0 010-2z" clipRule="evenodd" />
@@ -116,14 +116,14 @@ export default function Login() {
 
               {/* Email */}
               <div>
-                <label className="block text-sm font-semibold mb-2" style={{ color: '#374151' }}>البريد الإلكتروني</label>
+                <label htmlFor="email" className="block text-sm font-semibold mb-2" style={{ color: '#374151' }}>البريد الإلكتروني</label>
                 <div className="relative">
                   <span className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: '#94a3b8' }}>
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
                   </span>
-                  <input type="email" placeholder="example@lab.com" value={email}
+                  <input id="email" type="email" placeholder="example@lab.com" value={email}
                     onChange={e => setEmail(e.target.value)} required
                     className="w-full pr-11 pl-4 py-3.5 rounded-2xl text-right text-sm transition-all outline-none"
                     style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', color: '#1e293b' }}
@@ -135,21 +135,21 @@ export default function Login() {
 
               {/* Password */}
               <div>
-                <label className="block text-sm font-semibold mb-2" style={{ color: '#374151' }}>كلمة المرور</label>
+                <label htmlFor="password" className="block text-sm font-semibold mb-2" style={{ color: '#374151' }}>كلمة المرور</label>
                 <div className="relative">
                   <span className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: '#94a3b8' }}>
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                     </svg>
                   </span>
-                  <input type={showPassword ? 'text' : 'password'} placeholder="••••••••" value={password}
+                  <input id="password" type={showPassword ? 'text' : 'password'} placeholder="••••••••" value={password}
                     onChange={e => setPassword(e.target.value)} required
                     className="w-full pr-11 pl-11 py-3.5 rounded-2xl text-right text-sm transition-all outline-none"
                     style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', color: '#1e293b' }}
                     onFocus={e => { e.currentTarget.style.border = '1.5px solid #0e5ac8'; e.currentTarget.style.background = '#fff'; e.currentTarget.style.boxShadow = '0 0 0 4px rgba(14,90,200,0.08)' }}
                     onBlur={e => { e.currentTarget.style.border = '1.5px solid #e2e8f0'; e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.boxShadow = 'none' }}
                   />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)}
+                  <button type="button" aria-label={showPassword ? 'إخفاء' : 'إظهار'} aria-pressed={showPassword} aria-controls="password" onClick={() => setShowPassword(!showPassword)}
                     className="absolute left-3.5 top-1/2 -translate-y-1/2 transition-colors"
                     style={{ color: '#94a3b8' }}
                     onMouseOver={e => (e.currentTarget.style.color = '#0e5ac8')}
