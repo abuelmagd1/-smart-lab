@@ -502,7 +502,8 @@ export default function AIAssistant() {
     const body = {
       model: TEXT_MODEL,
       input: inputPayload,
-      tools: TOOLS
+      tools: TOOLS,
+      generation_config: { thinking_level: 'low' } // بيقلل وقت "التفكير" الداخلي عشان الرد يطلع أسرع
     }
     if (historyRef.current.previousId) body.previous_interaction_id = historyRef.current.previousId
 
@@ -684,7 +685,8 @@ export default function AIAssistant() {
           body: JSON.stringify({
             model: TEXT_MODEL,
             input: 'ابحث وجاوب بعربي بسيط بدون جداول أو Markdown: ' + (args.query || ''),
-            tools: [{ type: 'google_search' }]
+            tools: [{ type: 'google_search' }],
+            generation_config: { thinking_level: 'low' }
           })
         }, 45000, 1)
         const data = await safeJson(res)
@@ -830,7 +832,8 @@ export default function AIAssistant() {
                 { type: 'audio', data: base64Audio, mime_type: mimeType }
               ]
             }
-          ]
+          ],
+          generation_config: { thinking_level: 'low' }
         })
       }, 25000, 1)
 
