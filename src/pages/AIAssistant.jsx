@@ -4,7 +4,7 @@ import { supabase } from '../supabase'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
 
-const TEXT_MODEL = 'gemini-2.5-flash'
+const TEXT_MODEL = 'gemini-3.5-flash'
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1/interactions'
 
 const TTS_MODEL = 'gemini-3.1-flash-tts-preview'
