@@ -30,6 +30,8 @@ const formatTimer = (s) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + S
 const SUGGESTIONS = ['سجّل مريض جديد', 'إيه أسباب ارتفاع السكر؟', 'اعرض حالة مريض معين', 'افتح تقرير مريض للطباعة']
 
 const MAX_RECORDING_MS = 120000
+const MAX_IMAGES = 4
+const MAX_IMAGE_MB = 8
 
 const fetchWithTimeout = async (url, options, timeoutMs) => {
   options = options || {}
@@ -280,10 +282,14 @@ export default function AIAssistant() {
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [copiedIndex, setCopiedIndex] = useState(null)
+  // الصور دي بتتخزن هنا بس (React state = ذاكرة المتصفح). مفيش أي حفظ في Supabase أو أي تخزين دائم،
+  // وبمجرد ما التاب يتقفل أو الصفحة تتعمل لها Refresh، البيانات دي بتتمسح تلقائيًا من الذاكرة.
+  const [pendingImages, setPendingImages] = useState([])
 
   const messagesEndRef = useRef(null)
   const scrollContainerRef = useRef(null)
   const textareaRef = useRef(null)
+  const fileInputRef = useRef(null)
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
@@ -363,6 +369,54 @@ export default function AIAssistant() {
     }
   }
 
+  // --- التعامل مع إرفاق الصور (في الذاكرة فقط، بدون أي تخزين في Supabase) ---
+
+  const handleImageButtonClick = () => {
+    if (pendingImages.length >= MAX_IMAGES) {
+      showStatus('⚠️ الحد الأقصى ' + MAX_IMAGES + ' صور في المرة الواحدة')
+      return
+    }
+    if (fileInputRef.current) fileInputRef.current.click()
+  }
+
+  const handleImageFilesSelected = async (e) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = '' // عشان تقدر تختار نفس الصورة تاني لو مسحتها
+    if (!files.length) return
+
+    const room = MAX_IMAGES - pendingImages.length
+    if (room <= 0) {
+      showStatus('⚠️ الحد الأقصى ' + MAX_IMAGES + ' صور في المرة الواحدة')
+      return
+    }
+
+    const toProcess = files.slice(0, room)
+    for (let i = 0; i < toProcess.length; i++) {
+      const file = toProcess[i]
+      if (!file.type.startsWith('image/')) continue
+      if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
+        showStatus('⚠️ الصورة "' + file.name + '" أكبر من ' + MAX_IMAGE_MB + ' ميجا')
+        continue
+      }
+      try {
+        const base64 = await blobToBase64(file)
+        const previewUrl = URL.createObjectURL(file)
+        const imageItem = { id: Date.now() + '_' + Math.random().toString(36).slice(2), mimeType: file.type, base64: base64, previewUrl: previewUrl }
+        setPendingImages(function (prev) { return prev.concat([imageItem]) })
+      } catch (err) {
+        showStatus('⚠️ فشل تحميل الصورة "' + file.name + '"')
+      }
+    }
+  }
+
+  const removePendingImage = (id) => {
+    setPendingImages(function (prev) {
+      const target = prev.find(function (p) { return p.id === id })
+      if (target && target.previewUrl) URL.revokeObjectURL(target.previewUrl)
+      return prev.filter(function (p) { return p.id !== id })
+    })
+  }
+
   const buildSystemContext = (patients) => {
     const roster = patients.map(function (p) { return p.name + ' (' + p.age + ' سنة، ' + p.gender + ')' }).join('، ')
     return 'أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات (طب، علوم، تاريخ، تكنولوجيا، رياضة، فن، حياة عامة... أي موضوع).\n\n' +
@@ -370,7 +424,8 @@ export default function AIAssistant() {
       '- بتتكلم بالعربية العامية المصرية البسيطة\n' +
       '- عندك معلومات دقيقة وعميقة في كل حاجة تقريباً، ولما حد يسألك سؤال عام (مش بس طبي) جاوبه بثقة ومعرفة حقيقية\n' +
       '- أسلوبك في الرد ممتع وجذاب: تشبيهات بسيطة، نكتة خفيفة أحياناً، حماس في الكلام، مش رد جاف أو روبوتي\n' +
-      '- لما بتنفذ حاجة فورًا، بتقول "تمام، عملت كذا ✅" بشكل مختصر وبطعم شخصيتك\n\n' +
+      '- لما بتنفذ حاجة فورًا، بتقول "تمام، عملت كذا ✅" بشكل مختصر وبطعم شخصيتك\n' +
+      '- لو المستخدم بعتلك صورة (زي نتيجة تحليل ورقية، أو تقرير طبي، أو أي صورة تانية)، افحصها كويس واستخرج منها أي بيانات مفيدة (اسم مريض، نوع تحليل، قيم، إلخ) وساعده بيها في كلامه، بس متستخدمش أي أداة من غير ما تتأكد من البيانات الأول\n\n' +
       'بيانات المرضى المتاحة لك حاليًا (أسماء بس، بدون تفاصيل التحاليل):\n' +
       'عدد المرضى: ' + patients.length + '\n' +
       (roster || 'لا يوجد مرضى حاليًا') + '\n\n' +
@@ -392,12 +447,24 @@ export default function AIAssistant() {
   }
 
   const sendMessage = async (text) => {
-    const trimmed = text.trim()
-    if (!trimmed || loading) return
+    const trimmed = (text || '').trim()
+    const imagesToSend = pendingImages
+    if (!trimmed && imagesToSend.length === 0) return
+    if (loading) return
 
     stopSpeaking()
-    setMessages(function (prev) { return prev.concat([{ role: 'user', content: trimmed, time: Date.now() }]) })
+    const userMessageText = trimmed || 'صف الصورة دي وقولّي رأيك فيها'
+
+    setMessages(function (prev) {
+      return prev.concat([{
+        role: 'user',
+        content: userMessageText,
+        images: imagesToSend.map(function (img) { return img.previewUrl }),
+        time: Date.now()
+      }])
+    })
     setInput('')
+    setPendingImages([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     setLoading(true)
 
@@ -406,15 +473,19 @@ export default function AIAssistant() {
 
     try {
       const patients = await getPatients()
-      const contextText = buildSystemContext(patients) + '\n\nرسالة المستخدم: ' + trimmed
-      await runAssistantTurn(controller.signal, [{ type: 'text', text: contextText }], patients, 0)
+      const contextText = buildSystemContext(patients) + '\n\nرسالة المستخدم: ' + userMessageText
+      const contentBlocks = [{ type: 'text', text: contextText }]
+      imagesToSend.forEach(function (img) {
+        contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
+      })
+      await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patients, 0)
     } catch (err) {
       if (err.name === 'AbortError') {
         setMessages(function (prev) { return prev.concat([{ role: 'status', content: '⏹ تم إيقاف الطلب', time: Date.now() }]) })
       } else if (err.name === 'TimeoutError') {
-        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع.', retryText: trimmed, time: Date.now() }]) })
+        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع.', retryText: userMessageText, time: Date.now() }]) })
       } else {
-        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ تقني: ' + (err.message || 'غير معروف') + '\n\nلو المشكلة استمرت، افتح Console (F12) وابعت التفاصيل.', retryText: trimmed, time: Date.now() }]) })
+        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ تقني: ' + (err.message || 'غير معروف') + '\n\nلو المشكلة استمرت، افتح Console (F12) وابعت التفاصيل.', retryText: userMessageText, time: Date.now() }]) })
       }
     } finally {
       setLoading(false)
@@ -752,8 +823,13 @@ export default function AIAssistant() {
         body: JSON.stringify({
           model: TEXT_MODEL,
           input: [
-            { type: 'text', text: 'انسخ الكلام في التسجيل الصوتي ده حرفيًا كنص (عربي أو إنجليزي)، من غير أي تعليق أو شرح إضافي، النص بس.' },
-            { type: 'audio', data: base64Audio, mime_type: mimeType }
+            {
+              type: 'user_input',
+              content: [
+                { type: 'text', text: 'انسخ الكلام في التسجيل الصوتي ده حرفيًا كنص (عربي أو إنجليزي)، من غير أي تعليق أو شرح إضافي، النص بس.' },
+                { type: 'audio', data: base64Audio, mime_type: mimeType }
+              ]
+            }
           ]
         })
       }, 25000, 1)
@@ -902,6 +978,13 @@ export default function AIAssistant() {
                   border: msg.role === 'assistant' ? '1px solid var(--outline-variant)' : 'none',
                   lineHeight: '1.8'
                 }}>
+                {msg.role === 'user' && msg.images && msg.images.length > 0 && (
+                  <div className="flex gap-1.5 flex-wrap mb-2">
+                    {msg.images.map(function (src, idx) {
+                      return <img key={idx} src={src} alt="صورة مرفقة" className="w-20 h-20 object-cover rounded-lg" style={{ border: '1px solid rgba(255,255,255,0.4)' }} />
+                    })}
+                  </div>
+                )}
                 {msg.role === 'assistant'
                   ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
                   : msg.content}
@@ -948,7 +1031,32 @@ export default function AIAssistant() {
         </button>
       )}
 
-      <div className="py-4 flex gap-3 items-end" style={{ borderTop: '1px solid var(--outline-variant)' }}>
+      {pendingImages.length > 0 && (
+        <div className="flex gap-2 flex-wrap pb-2" style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '10px' }}>
+          {pendingImages.map(function (img) {
+            return (
+              <div key={img.id} className="relative">
+                <img src={img.previewUrl} alt="صورة مرفقة" className="w-16 h-16 object-cover rounded-lg" style={{ border: '1px solid var(--outline-variant)' }} />
+                <button onClick={function () { removePendingImage(img.id) }} aria-label="إزالة الصورة"
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-xs text-white font-bold"
+                  style={{ background: '#dc2626' }}>
+                  ×
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="py-4 flex gap-3 items-end" style={{ borderTop: pendingImages.length > 0 ? 'none' : '1px solid var(--outline-variant)' }}>
+        <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageFilesSelected} style={{ display: 'none' }} />
+
+        <button onClick={handleImageButtonClick} aria-label="إرفاق صورة" disabled={pendingImages.length >= MAX_IMAGES}
+          className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
+          style={{ background: '#f1f3f4', border: '1px solid var(--outline-variant)', opacity: pendingImages.length >= MAX_IMAGES ? 0.5 : 1 }}>
+          🖼️
+        </button>
+
         <button onClick={toggleListening} aria-label={listening ? 'إيقاف التسجيل' : 'بدء التسجيل الصوتي'}
           className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0 relative"
           style={{ background: listening ? '#fee2e2' : '#f1f3f4', border: listening ? '2px solid #ef4444' : '1px solid var(--outline-variant)' }}>
@@ -969,9 +1077,9 @@ export default function AIAssistant() {
           onBlur={function (e) { e.target.style.border = '1px solid var(--outline-variant)' }}
         />
 
-        <button onClick={function () { sendMessage(input) }} disabled={loading || !input.trim()} aria-label="إرسال"
+        <button onClick={function () { sendMessage(input) }} disabled={loading || (!input.trim() && pendingImages.length === 0)} aria-label="إرسال"
           className="w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0"
-          style={{ background: 'var(--primary-container)', opacity: (loading || !input.trim()) ? 0.5 : 1 }}>
+          style={{ background: 'var(--primary-container)', opacity: (loading || (!input.trim() && pendingImages.length === 0)) ? 0.5 : 1 }}>
           ➤
         </button>
       </div>
