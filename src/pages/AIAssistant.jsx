@@ -32,6 +32,7 @@ const SUGGESTIONS = ['سجّل مريض جديد', 'إيه أسباب ارتفا
 const MAX_RECORDING_MS = 120000
 const MAX_IMAGES = 4
 const MAX_IMAGE_MB = 8
+const AUTO_RESET_AFTER_TURNS = 8 // بعد كل 8 ردود، نبدأ سياق جديد مع Gemini عشان الرد يفضل سريع
 
 const fetchWithTimeout = async (url, options, timeoutMs) => {
   options = options || {}
@@ -328,6 +329,7 @@ export default function AIAssistant() {
   const recordingTimeoutRef = useRef(null)
   const recordingIntervalRef = useRef(null)
   const currentAudioRef = useRef(null)
+  const turnCountRef = useRef(0)
 
   useEffect(function () {
     if (messages && messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
@@ -448,6 +450,18 @@ export default function AIAssistant() {
     })
   }
 
+  // بيبدأ سياق جديد تمامًا مع Gemini (بيمسح previous_interaction_id) عشان الرد يفضل سريع.
+  // بيانات المرضى والتحاليل في Supabase متأثرتش خالص، بس لابو هينسى تفاصيل كلام المحادثة القديمة.
+  const startNewConversation = () => {
+    stopSpeaking()
+    if (loading) stopGeneration()
+    pendingImages.forEach(function (img) { if (img.previewUrl) URL.revokeObjectURL(img.previewUrl) })
+    setPendingImages([])
+    historyRef.current = { previousId: null }
+    turnCountRef.current = 0
+    setMessages([{ role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي تعمله وأنا هعمله فوراً!' }])
+  }
+
   const sendMessage = async (text) => {
     const trimmed = (text || '').trim()
     const imagesToSend = pendingImages
@@ -469,6 +483,13 @@ export default function AIAssistant() {
     setPendingImages([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     setLoading(true)
+
+    turnCountRef.current += 1
+    if (turnCountRef.current > AUTO_RESET_AFTER_TURNS && historyRef.current.previousId) {
+      historyRef.current.previousId = null
+      turnCountRef.current = 1
+      showStatus('🔄 بدأت سياق جديد مع لابو عشان الرد يفضل سريع (بيانات المرضى والتحاليل زي ما هي، بس نسي تفاصيل كلامنا القديم في المحادثة دي)')
+    }
 
     const controller = new AbortController()
     abortControllerRef.current = controller
@@ -935,9 +956,16 @@ export default function AIAssistant() {
 
   return (
     <div className="flex flex-col p-6 pb-0 relative" style={{ height: 'calc(100vh - 65px)' }} dir="rtl">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>المساعد الذكي</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>تحدث أو اكتب لمساعدك الذكي "لابو"</p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>المساعد الذكي</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>تحدث أو اكتب لمساعدك الذكي "لابو"</p>
+        </div>
+        <button onClick={startNewConversation} aria-label="بدء محادثة جديدة"
+          className="text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 flex-shrink-0"
+          style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)', border: '1px solid var(--outline-variant)' }}>
+          🆕 محادثة جديدة
+        </button>
       </div>
 
       {isSpeaking && (
