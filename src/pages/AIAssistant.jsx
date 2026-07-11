@@ -33,7 +33,6 @@ const MAX_RECORDING_MS = 120000
 const MAX_IMAGES = 4
 const MAX_IMAGE_MB = 8
 const AUTO_RESET_AFTER_TURNS = 8 // بعد كل 8 ردود، نبدأ سياق جديد مع Gemini عشان الرد يفضل سريع
-const HARD_RESPONSE_TIMEOUT_MS = 10000 // حد أقصى مطلق لانتظار المستخدم للرد (مهما حصل، متستناش أكتر من كده)
 
 const fetchWithTimeout = async (url, options, timeoutMs) => {
   options = options || {}
@@ -498,27 +497,16 @@ export default function AIAssistant() {
     const controller = new AbortController()
     abortControllerRef.current = controller
 
-    let hitHardTimeout = false
-    const hardTimer = setTimeout(function () {
-      hitHardTimeout = true
-      controller.abort()
-    }, HARD_RESPONSE_TIMEOUT_MS)
-
     try {
-      const workPromise = (async function () {
-        const patients = await getPatients()
-        const contentBlocks = [{ type: 'text', text: userMessageText }]
-        imagesToSend.forEach(function (img) {
-          contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
-        })
-        const streamState = { id: null, text: '' }
-        await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patients, 0, streamState)
-      })()
-      await workPromise
+      const patients = await getPatients()
+      const contentBlocks = [{ type: 'text', text: userMessageText }]
+      imagesToSend.forEach(function (img) {
+        contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
+      })
+      const streamState = { id: null, text: '' }
+      await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patients, 0, streamState)
     } catch (err) {
-      if (hitHardTimeout) {
-        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'المعذرة، ده أخد أكتر من 10 ثواني فوقفته. جرّب تاني أو اسأل بصيغة أبسط.', retryText: userMessageText, time: Date.now() }]) })
-      } else if (err.name === 'AbortError') {
+      if (err.name === 'AbortError') {
         setMessages(function (prev) { return prev.concat([{ role: 'status', content: '⏹ تم إيقاف الطلب', time: Date.now() }]) })
       } else if (err.name === 'TimeoutError') {
         setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع.', retryText: userMessageText, time: Date.now() }]) })
@@ -526,7 +514,6 @@ export default function AIAssistant() {
         setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ تقني: ' + (err.message || 'غير معروف') + '\n\nلو المشكلة استمرت، افتح Console (F12) وابعت التفاصيل.', retryText: userMessageText, time: Date.now() }]) })
       }
     } finally {
-      clearTimeout(hardTimer)
       setLoading(false)
       abortControllerRef.current = null
       if (textareaRef.current) textareaRef.current.focus()
