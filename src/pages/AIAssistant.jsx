@@ -511,7 +511,8 @@ export default function AIAssistant() {
         imagesToSend.forEach(function (img) {
           contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
         })
-        await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patients, 0)
+        const streamState = { id: null, text: '' }
+        await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patients, 0, streamState)
       })()
       await workPromise
     } catch (err) {
@@ -534,7 +535,7 @@ export default function AIAssistant() {
 
   const stopGeneration = () => { if (abortControllerRef.current) abortControllerRef.current.abort() }
 
-  const runAssistantTurn = async (signal, inputPayload, patients, depth) => {
+  const runAssistantTurn = async (signal, inputPayload, patients, depth, streamState) => {
     if (depth > 6) return
 
     const body = {
@@ -542,66 +543,135 @@ export default function AIAssistant() {
       input: inputPayload,
       tools: TOOLS,
       system_instruction: SYSTEM_INSTRUCTION,
-      generation_config: { thinking_level: 'low' } // بيقلل وقت "التفكير" الداخلي عشان الرد يطلع أسرع
+      generation_config: { thinking_level: 'low' }, // بيقلل وقت "التفكير" الداخلي عشان الرد يطلع أسرع
+      stream: true // بيخلي الرد يوصل تدريجيًا (SSE) بدل ما نستنى الرد كامل يخلص
     }
     if (historyRef.current.previousId) body.previous_interaction_id = historyRef.current.previousId
 
-    const response = await fetchWithRetry(INTERACTIONS_URL, {
+    const response = await fetch(INTERACTIONS_URL + '?alt=sse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       signal: signal,
       body: JSON.stringify(body)
-    }, 35000, 1)
+    })
 
-    const data = await safeJson(response)
-
-    if (!response.ok) {
-      const apiErrorMsg = (data.error && data.error.message) ? data.error.message : ('رمز الخطأ: ' + response.status)
+    if (!response.ok || !response.body) {
+      let apiErrorMsg = 'رمز الخطأ: ' + response.status
+      try {
+        const errData = await response.json()
+        if (errData.error && errData.error.message) apiErrorMsg = errData.error.message
+      } catch (e) { /* الرد مش JSON، هنكتفي برمز الخطأ */ }
       throw new Error('خطأ من Gemini API: ' + apiErrorMsg)
     }
 
-    if (data.id) historyRef.current.previousId = data.id
+    const functionCallsMap = {}
+    const functionCallOrder = []
+    let finalInteractionId = null
+    let finalStatus = null
 
-    const steps = data.steps || []
-    const functionCalls = steps.filter(function (s) { return s.type === 'function_call' })
-    const modelOutputSteps = steps.filter(function (s) { return s.type === 'model_output' })
-    let textOut = ''
-    modelOutputSteps.forEach(function (s) {
-      (s.content || []).forEach(function (c) {
-        if (c.type === 'text') textOut += c.text
-      })
-    })
+    const handleSSEEvent = function (eventType, data) {
+      if (eventType === 'step.start' && data.step) {
+        if (data.step.type === 'function_call') {
+          functionCallsMap[data.index] = { name: data.step.name, id: data.step.id, argsText: '' }
+          functionCallOrder.push(data.index)
+        }
+      } else if (eventType === 'step.delta' && data.delta) {
+        if (data.delta.type === 'text') {
+          appendAssistantStreamText(streamState, data.delta.text)
+        } else if (data.delta.type === 'arguments' || data.delta.type === 'arguments_delta') {
+          const fc = functionCallsMap[data.index]
+          if (fc) fc.argsText += (data.delta.partial_arguments || data.delta.arguments_delta || data.delta.text || '')
+        }
+      } else if (eventType === 'interaction.completed' && data.interaction) {
+        finalInteractionId = data.interaction.id
+        finalStatus = data.interaction.status
+      } else if (eventType === 'error') {
+        throw new Error('خطأ من Gemini API: ' + ((data.error && data.error.message) || 'غير معروف'))
+      }
+    }
 
-    if (functionCalls.length > 0) {
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      buffer += decoder.decode(chunk.value, { stream: true })
+
+      let sepIndex
+      while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+        const rawEvent = buffer.slice(0, sepIndex)
+        buffer = buffer.slice(sepIndex + 2)
+        if (!rawEvent.trim()) continue
+
+        let eventType = null
+        let dataStr = ''
+        rawEvent.split('\n').forEach(function (line) {
+          if (line.indexOf('event:') === 0) eventType = line.slice(6).trim()
+          else if (line.indexOf('data:') === 0) dataStr += line.slice(5).trim()
+        })
+
+        if (dataStr) {
+          let data
+          try { data = JSON.parse(dataStr) } catch (e) { continue }
+          handleSSEEvent(eventType, data)
+        }
+      }
+    }
+
+    if (finalInteractionId) historyRef.current.previousId = finalInteractionId
+
+    if (finalStatus === 'requires_action' && functionCallOrder.length > 0) {
       const functionResults = []
-      for (let i = 0; i < functionCalls.length; i++) {
-        const call = functionCalls[i]
+      for (let i = 0; i < functionCallOrder.length; i++) {
+        const fc = functionCallsMap[functionCallOrder[i]]
+        let args = {}
+        try { args = fc.argsText ? JSON.parse(fc.argsText) : {} } catch (e) { args = {} }
         let resultText
         try {
-          resultText = await handleToolCall(call, signal, patients)
+          resultText = await handleToolCall({ name: fc.name, id: fc.id, arguments: args }, signal, patients)
         } catch (err) {
           if (err.name === 'AbortError') throw err
           resultText = 'حصل خطأ غير متوقع في تنفيذ هذه العملية: ' + err.message
         }
         functionResults.push({
           type: 'function_result',
-          name: call.name,
-          call_id: call.id,
+          name: fc.name,
+          call_id: fc.id,
           result: [{ type: 'text', text: resultText }]
         })
       }
 
-      await runAssistantTurn(signal, functionResults, patients, depth + 1)
+      await runAssistantTurn(signal, functionResults, patients, depth + 1, streamState)
       return
     }
 
-    const reply = textOut || 'حدث خطأ، حاول مرة أخرى.'
-    setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: reply, time: Date.now() }]) })
-    speakText(reply)
+    // خلصت كل الجولات (مفيش أدوات معلّقة) - دلوقتي نتأكد إن فيه رد ظهر، ونسمّعه
+    if (!streamState.text) {
+      setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ، حاول مرة أخرى.', time: Date.now() }]) })
+    } else {
+      speakText(streamState.text)
+    }
   }
 
   const showStatus = (text) => {
     setMessages(function (prev) { return prev.concat([{ role: 'status', content: text, time: Date.now() }]) })
+  }
+
+  // بيضيف/يحدّث فقاعة رد لابو تدريجيًا كل ما توصل قطعة نص جديدة من الـ streaming (SSE)،
+  // بدل ما نستنى الرد كامل يخلص وبعدين يظهر مرة واحدة
+  const appendAssistantStreamText = (streamState, chunk) => {
+    if (!chunk) return
+    streamState.text += chunk
+    if (!streamState.id) {
+      streamState.id = 'stream_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+      setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: chunk, time: Date.now(), streamId: streamState.id }]) })
+    } else {
+      const sid = streamState.id
+      const fullText = streamState.text
+      setMessages(function (prev) { return prev.map(function (m) { return m.streamId === sid ? Object.assign({}, m, { content: fullText }) : m }) })
+    }
   }
 
   const handleToolCall = async (call, signal, patients) => {
