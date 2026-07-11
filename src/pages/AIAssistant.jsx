@@ -414,7 +414,7 @@ export default function AIAssistant() {
       } else if (err.name === 'TimeoutError') {
         setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع.', retryText: trimmed, time: Date.now() }]) })
       } else {
-        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ، حاول تاني.', retryText: trimmed, time: Date.now() }]) })
+        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ تقني: ' + (err.message || 'غير معروف') + '\n\nلو المشكلة استمرت، افتح Console (F12) وابعت التفاصيل.', retryText: trimmed, time: Date.now() }]) })
       }
     } finally {
       setLoading(false)
@@ -443,6 +443,11 @@ export default function AIAssistant() {
     }, 35000, 1)
 
     const data = await safeJson(response)
+
+    if (!response.ok) {
+      const apiErrorMsg = (data.error && data.error.message) ? data.error.message : ('رمز الخطأ: ' + response.status)
+      throw new Error('خطأ من Gemini API: ' + apiErrorMsg)
+    }
 
     if (data.id) historyRef.current.previousId = data.id
 
@@ -753,7 +758,13 @@ export default function AIAssistant() {
         })
       }, 25000, 1)
 
-      if (!res.ok) { setLoading(false); showStatus('⚠️ حصل خطأ أثناء تحويل الصوت لنص، حاول تاني'); return }
+      if (!res.ok) {
+        const errData = await safeJson(res).catch(function () { return {} })
+        const apiErrorMsg = (errData.error && errData.error.message) ? errData.error.message : ('رمز الخطأ: ' + res.status)
+        setLoading(false)
+        showStatus('⚠️ خطأ في تحويل الصوت: ' + apiErrorMsg)
+        return
+      }
 
       const data = await safeJson(res)
       const steps = data.steps || []
