@@ -8,6 +8,7 @@ const NewPatient = lazy(() => import('./pages/NewPatient'))
 const Results = lazy(() => import('./pages/Results'))
 const AIAssistant = lazy(() => import('./pages/AIAssistant'))
 const Reports = lazy(() => import('./pages/Reports'))
+const Statistics = lazy(() => import('./pages/Statistics'))
 const Layout = lazy(() => import('./components/Layout'))
 const AdminLayout = lazy(() => import('./components/AdminLayout'))
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
@@ -69,6 +70,7 @@ function App() {
             <Route path="/results" element={<Results />} />
             <Route path="/ai-assistant" element={<AIAssistant />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/statistics" element={<Statistics />} />
           </Route>
 
           {/* مسارات الأدمن */}
