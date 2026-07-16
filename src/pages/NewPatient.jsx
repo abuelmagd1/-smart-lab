@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import BarcodeLabel from '../components/BarcodeLabel'
+import { useToast } from '../components/Toast'
 
 export default function NewPatient() {
+  const showToast = useToast()
   const [form, setForm] = useState({ name: '', phone: '', age: '', birth_date: '', gender: '', doctor: '', notes: '' })
   const [testCatalog, setTestCatalog] = useState([])
   const [panels, setPanels] = useState([])
@@ -12,17 +14,20 @@ export default function NewPatient() {
   const [search, setSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState('All')
   const [loading, setLoading] = useState(false)
+  const [catalogLoading, setCatalogLoading] = useState(true)
   const [success, setSuccess] = useState(false)
   const [lastPatient, setLastPatient] = useState(null)
   const [showBarcode, setShowBarcode] = useState(false)
   const [editingTest, setEditingTest] = useState(null)
   const [editingPanel, setEditingPanel] = useState(null)
+  const [savingEdit, setSavingEdit] = useState(false)
 
   useEffect(() => { fetchTests(); fetchPanels() }, [])
 
   const fetchTests = async () => {
     const { data } = await supabase.from('test_catalog').select('*').order('category')
     setTestCatalog(data || [])
+    setCatalogLoading(false)
   }
 
   const fetchPanels = async () => {
@@ -63,32 +68,57 @@ export default function NewPatient() {
   }
 
   const saveTestEdit = async () => {
+    setSavingEdit(true)
     const priceNum = parseFloat(editingTest.price)
-    await supabase.from('test_catalog').update({
+    const { error } = await supabase.from('test_catalog').update({
       unit: editingTest.unit,
       normal_range: editingTest.normal_range,
       price: isNaN(priceNum) ? 0 : priceNum,
     }).eq('id', editingTest.id)
+
+    setSavingEdit(false)
+    if (error) {
+      showToast('حدث خطأ أثناء حفظ التعديل: ' + error.message, 'error')
+      return
+    }
     setEditingTest(null)
+    showToast('تم تحديث بيانات التحليل بنجاح', 'success')
     fetchTests()
   }
 
   const savePanelEdit = async () => {
+    setSavingEdit(true)
     const priceNum = parseFloat(editingPanel.price)
-    await supabase.from('test_panels').update({
+    const { error } = await supabase.from('test_panels').update({
       price: isNaN(priceNum) ? 0 : priceNum,
     }).eq('id', editingPanel.id)
+
+    setSavingEdit(false)
+    if (error) {
+      showToast('حدث خطأ أثناء حفظ التعديل: ' + error.message, 'error')
+      return
+    }
     setEditingPanel(null)
+    showToast('تم تحديث سعر الباقة بنجاح', 'success')
     fetchPanels()
   }
 
   const handleSubmit = async () => {
-    if (!form.name) return alert('من فضلك ادخل اسم المريض')
+    if (!form.name.trim()) {
+      showToast('من فضلك ادخل اسم المريض', 'warning')
+      return
+    }
 
     const ageNum = parseInt(form.age)
-    if (!form.age || isNaN(ageNum)) return alert('من فضلك ادخل سن صحيح للمريض')
+    if (!form.age || isNaN(ageNum)) {
+      showToast('من فضلك ادخل سن صحيح للمريض', 'warning')
+      return
+    }
 
-    if (selectedTests.length === 0 && selectedPanels.length === 0) return alert('اختار تحليل أو باقة واحدة على الأقل')
+    if (selectedTests.length === 0 && selectedPanels.length === 0) {
+      showToast('اختار تحليل أو باقة واحدة على الأقل', 'warning')
+      return
+    }
 
     setLoading(true)
 
@@ -105,7 +135,11 @@ export default function NewPatient() {
       }])
       .select().single()
 
-    if (error) { alert('حدث خطأ أثناء حفظ بيانات المريض: ' + error.message); setLoading(false); return }
+    if (error) {
+      showToast('حدث خطأ أثناء حفظ بيانات المريض: ' + error.message, 'error')
+      setLoading(false)
+      return
+    }
 
     const singleTestRows = selectedTests.map(t => ({
       patient_id: patient.id,
@@ -154,7 +188,7 @@ export default function NewPatient() {
     const { error: testsError } = await supabase.from('tests').insert(allRows)
 
     if (testsError) {
-      alert('تم حفظ بيانات المريض، لكن حصل خطأ أثناء حفظ التحاليل: ' + testsError.message + '\nراجع التحاليل من صفحة "نتائج التحاليل" وأضفها يدويًا لو لزم الأمر.')
+      showToast('تم حفظ بيانات المريض، لكن حصل خطأ أثناء حفظ التحاليل. راجع صفحة نتائج التحاليل.', 'warning', 6000)
       setLoading(false)
       return
     }
@@ -162,6 +196,7 @@ export default function NewPatient() {
     setLoading(false)
     setSuccess(true)
     setLastPatient(patient)
+    showToast(`تم تسجيل المريض "${form.name}" بنجاح`, 'success')
     setForm({ name: '', phone: '', age: '', birth_date: '', gender: '', doctor: '', notes: '' })
     setSelectedTests([])
     setSelectedPanels([])
@@ -221,15 +256,15 @@ export default function NewPatient() {
               </div>
             </div>
             <div className="flex gap-3 mt-5 justify-end">
-              <button onClick={() => setEditingTest(null)}
+              <button onClick={() => setEditingTest(null)} disabled={savingEdit}
                 className="px-4 py-2 rounded-lg text-sm"
                 style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
                 إلغاء
               </button>
-              <button onClick={saveTestEdit}
+              <button onClick={saveTestEdit} disabled={savingEdit}
                 className="px-4 py-2 rounded-lg text-sm text-white"
-                style={{ background: 'var(--primary-container)' }}>
-                حفظ
+                style={{ background: 'var(--primary-container)', opacity: savingEdit ? 0.7 : 1 }}>
+                {savingEdit ? 'جاري الحفظ...' : 'حفظ'}
               </button>
             </div>
           </div>
@@ -249,15 +284,15 @@ export default function NewPatient() {
                 style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }} />
             </div>
             <div className="flex gap-3 mt-5 justify-end">
-              <button onClick={() => setEditingPanel(null)}
+              <button onClick={() => setEditingPanel(null)} disabled={savingEdit}
                 className="px-4 py-2 rounded-lg text-sm"
                 style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
                 إلغاء
               </button>
-              <button onClick={savePanelEdit}
+              <button onClick={savePanelEdit} disabled={savingEdit}
                 className="px-4 py-2 rounded-lg text-sm text-white"
-                style={{ background: 'var(--primary-container)' }}>
-                حفظ
+                style={{ background: 'var(--primary-container)', opacity: savingEdit ? 0.7 : 1 }}>
+                {savingEdit ? 'جاري الحفظ...' : 'حفظ'}
               </button>
             </div>
           </div>
@@ -271,14 +306,16 @@ export default function NewPatient() {
           <h2 className="font-semibold mb-4" style={{ color: 'var(--on-surface)' }}>بيانات المريض</h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {[
-              { label: 'الاسم بالكامل', key: 'name', type: 'text', placeholder: 'أحمد محمد علي' },
+              { label: 'الاسم بالكامل', key: 'name', type: 'text', placeholder: 'أحمد محمد علي', required: true },
               { label: 'رقم الهاتف', key: 'phone', type: 'tel', placeholder: '01012345678' },
-              { label: 'السن', key: 'age', type: 'number', placeholder: '30' },
+              { label: 'السن', key: 'age', type: 'number', placeholder: '30', required: true },
               { label: 'تاريخ الميلاد', key: 'birth_date', type: 'date', placeholder: '' },
               { label: 'اسم الدكتور', key: 'doctor', type: 'text', placeholder: 'د. محمد أحمد' },
             ].map(field => (
               <div key={field.key}>
-                <label htmlFor={field.key} className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>{field.label}</label>
+                <label htmlFor={field.key} className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>
+                  {field.label}{field.required && <span style={{ color: '#dc2626' }}> *</span>}
+                </label>
                 <input id={field.key} type={field.type} placeholder={field.placeholder} value={form[field.key]}
                   onChange={e => setForm(prev => ({ ...prev, [field.key]: e.target.value }))}
                   className="w-full px-4 py-3 rounded-lg outline-none text-right"
@@ -302,7 +339,18 @@ export default function NewPatient() {
         </div>
 
         {/* الباقات (زي CBC) */}
-        {panels.length > 0 && (
+        {catalogLoading ? (
+          <div style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '1.5rem' }}>
+            <div className="animate-pulse space-y-2">
+              <div style={{ height: '16px', width: '160px', background: '#f1f3f4', borderRadius: '6px' }} />
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {[1, 2].map(i => (
+                  <div key={i} style={{ height: '48px', background: '#f1f3f4', borderRadius: '10px' }} />
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : panels.length > 0 && (
           <div style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '1.5rem' }}>
             <h2 className="font-semibold mb-4" style={{ color: 'var(--on-surface)' }}>
               الباقات (تحاليل مجمّعة)
@@ -333,6 +381,7 @@ export default function NewPatient() {
                       </div>
                     </label>
                     <button onClick={() => setEditingPanel({ ...panel })}
+                      aria-label={`تعديل سعر ${panel.name}`}
                       className="text-xs px-2 py-1 rounded-lg"
                       style={{ background: '#e8f0fe', color: 'var(--primary-container)' }}>
                       ✏️
@@ -378,34 +427,47 @@ export default function NewPatient() {
             ))}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-3 max-h-64 overflow-y-auto">
-            {filtered.map(test => {
-              const isSelected = !!selectedTests.find(t => t.id === test.id)
-              return (
-                <div key={test.id}
-                  className="flex items-center gap-1 p-2 rounded-lg transition-all"
-                  style={{
-                    border: `1px solid ${isSelected ? 'var(--primary-container)' : 'var(--outline-variant)'}`,
-                    background: isSelected ? '#e8f0fe' : 'white'
-                  }}>
-                  <label onClick={() => toggleTest(test)} className="flex items-center gap-2 flex-1 cursor-pointer">
-                    <input type="checkbox" checked={isSelected} onChange={() => toggleTest(test)} className="w-3 h-3 accent-blue-600" />
-                    <div>
-                      <p className="text-xs font-medium" style={{ color: 'var(--on-surface)' }}>{test.name}</p>
-                      <p className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-                        {test.unit}{test.price ? ` • ${test.price} جنيه` : ''}
-                      </p>
-                    </div>
-                  </label>
-                  <button onClick={() => setEditingTest({ ...test })}
-                    className="text-xs px-1.5 py-1 rounded-lg flex-shrink-0"
-                    style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
-                    ✏️
-                  </button>
-                </div>
-              )
-            })}
-          </div>
+          {catalogLoading ? (
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+              {[1, 2, 3, 4, 5, 6].map(i => (
+                <div key={i} className="animate-pulse" style={{ height: '44px', background: '#f1f3f4', borderRadius: '10px' }} />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <p className="text-sm text-center py-6" style={{ color: 'var(--on-surface-variant)' }}>
+              لا توجد تحاليل مطابقة لبحثك
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-3 max-h-64 overflow-y-auto">
+              {filtered.map(test => {
+                const isSelected = !!selectedTests.find(t => t.id === test.id)
+                return (
+                  <div key={test.id}
+                    className="flex items-center gap-1 p-2 rounded-lg transition-all"
+                    style={{
+                      border: `1px solid ${isSelected ? 'var(--primary-container)' : 'var(--outline-variant)'}`,
+                      background: isSelected ? '#e8f0fe' : 'white'
+                    }}>
+                    <label onClick={() => toggleTest(test)} className="flex items-center gap-2 flex-1 cursor-pointer">
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleTest(test)} className="w-3 h-3 accent-blue-600" />
+                      <div>
+                        <p className="text-xs font-medium" style={{ color: 'var(--on-surface)' }}>{test.name}</p>
+                        <p className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+                          {test.unit}{test.price ? ` • ${test.price} جنيه` : ''}
+                        </p>
+                      </div>
+                    </label>
+                    <button onClick={() => setEditingTest({ ...test })}
+                      aria-label={`تعديل ${test.name}`}
+                      className="text-xs px-1.5 py-1 rounded-lg flex-shrink-0"
+                      style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
+                      ✏️
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* ملاحظات */}
@@ -428,12 +490,24 @@ export default function NewPatient() {
             إلغاء
           </button>
           <button onClick={handleSubmit} disabled={loading}
-            className="px-6 py-2 rounded-lg text-sm font-medium text-white"
+            className="px-6 py-2 rounded-lg text-sm font-medium text-white flex items-center gap-2"
             style={{ background: 'var(--primary-container)', opacity: loading ? 0.7 : 1 }}>
+            {loading && (
+              <span style={{
+                width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.4)',
+                borderTopColor: 'white', borderRadius: '50%', display: 'inline-block',
+                animation: 'lab-spin-btn 0.7s linear infinite',
+              }} />
+            )}
             {loading ? 'جاري الحفظ...' : 'حفظ'}
           </button>
         </div>
       </div>
+      <style>{`
+        @keyframes lab-spin-btn {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   )
 }

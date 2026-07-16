@@ -1,6 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+﻿import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Suspense, lazy, useEffect, useState } from 'react'
 import { supabase } from './supabase'
+import { ToastProvider } from './components/Toast'
 
 const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -57,31 +58,31 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center" dir="rtl"><div className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>جارٍ تحميل الصفحة...</div></div>}>
-        <Routes>
-          <Route path="/login" element={!session ? <Login /> : <Navigate to={role === 'admin' ? '/admin' : '/dashboard'} />} />
-          <Route path="/" element={<Navigate to={!session ? '/login' : role === 'admin' ? '/admin' : '/dashboard'} />} />
+    <ToastProvider>
+      <BrowserRouter>
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center" dir="rtl"><div className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>جارٍ تحميل الصفحة...</div></div>}>
+          <Routes>
+            <Route path="/login" element={!session ? <Login /> : <Navigate to={role === 'admin' ? '/admin' : '/dashboard'} />} />
+            <Route path="/" element={<Navigate to={!session ? '/login' : role === 'admin' ? '/admin' : '/dashboard'} />} />
 
-          {/* مسارات الدكتور */}
-          <Route element={session && role === 'doctor' ? <Layout /> : <Navigate to="/login" />}>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/new-patient" element={<NewPatient />} />
-            <Route path="/results" element={<Results />} />
-            <Route path="/ai-assistant" element={<AIAssistant />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/statistics" element={<Statistics />} />
-          </Route>
+            <Route element={session && role === 'doctor' ? <Layout /> : <Navigate to="/login" />}>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/new-patient" element={<NewPatient />} />
+              <Route path="/results" element={<Results />} />
+              <Route path="/ai-assistant" element={<AIAssistant />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/statistics" element={<Statistics />} />
+            </Route>
 
-          {/* مسارات الأدمن */}
-          <Route element={session && role === 'admin' ? <AdminLayout /> : <Navigate to="/login" />}>
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/add-lab" element={<AddLab />} />
-            <Route path="/admin/notifications" element={<AdminNotifications />} />
-          </Route>
-        </Routes>
-      </Suspense>
-    </BrowserRouter>
+            <Route element={session && role === 'admin' ? <AdminLayout /> : <Navigate to="/login" />}>
+              <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/admin/add-lab" element={<AddLab />} />
+              <Route path="/admin/notifications" element={<AdminNotifications />} />
+            </Route>
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </ToastProvider>
   )
 }
 

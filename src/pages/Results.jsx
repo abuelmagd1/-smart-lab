@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import BarcodeLabel from '../components/BarcodeLabel'
+import LoadingSpinner from '../components/LoadingSpinner'
+import EmptyState from '../components/EmptyState'
+import { useToast } from '../components/Toast'
 
 const statusStyle = {
   'تم التجميع': { bg: '#f3f4f6', color: '#374151' },
@@ -11,12 +14,7 @@ const statusStyle = {
 
 const SAMPLE_STAGES = ['تم التجميع', 'تم الاستلام', 'قيد التحليل', 'معتمد']
 
-const SECTION_LABELS = {
-  RBC: 'RBC',
-  Platelet: 'Platelet',
-  WBC: 'WBC',
-  WBC_DIFF: 'WBC - Diff',
-}
+const SECTION_LABELS = { RBC: 'RBC', Platelet: 'Platelet', WBC: 'WBC', WBC_DIFF: 'WBC - Diff' }
 
 const periodFilters = [
   { key: 'all', label: 'الكل' },
@@ -34,6 +32,7 @@ const getBucket = (dateStr) => {
   const startOfYesterday = new Date(startOfToday); startOfYesterday.setDate(startOfYesterday.getDate() - 1)
   const startOfWeek = new Date(startOfToday); startOfWeek.setDate(startOfWeek.getDate() - 7)
   const startOfMonth = new Date(startOfToday); startOfMonth.setDate(startOfMonth.getDate() - 30)
+
   if (date >= startOfToday) return 'today'
   if (date >= startOfYesterday) return 'yesterday'
   if (date >= startOfWeek) return 'week'
@@ -41,20 +40,41 @@ const getBucket = (dateStr) => {
   return 'older'
 }
 
-// بيحسب لو القيمة برا المدى الطبيعي (H/L) عشان نلوّن ونعلّم زي النموذج
 const calcFlag = (value, range) => {
   const num = parseFloat(String(value).replace(',', '.'))
   if (isNaN(num) || !range) return ''
   const matches = String(range).match(/-?\d+(\.\d+)?/g)
   if (!matches || matches.length < 2) return ''
   const nums = matches.map(parseFloat).sort((a, b) => a - b)
-  const [low, high] = nums
+  const low = nums[0]
+  const high = nums[1]
   if (num > high) return 'H'
   if (num < low) return 'L'
   return ''
 }
 
+const splitTests = (patient) => {
+  const singleTests = []
+  const panelGroups = {}
+  ;(patient.tests || []).forEach(t => {
+    if (t.panel_instance_id) {
+      if (!panelGroups[t.panel_instance_id]) {
+        panelGroups[t.panel_instance_id] = { panel_code: t.panel_code, items: [], comment: t.comment || '' }
+      }
+      panelGroups[t.panel_instance_id].items.push(t)
+      if (t.comment) panelGroups[t.panel_instance_id].comment = t.comment
+    } else {
+      singleTests.push(t)
+    }
+  })
+  Object.values(panelGroups).forEach(g => {
+    g.items.sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+  })
+  return { singleTests, panelGroups }
+}
+
 export default function Results() {
+  const showToast = useToast()
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -63,9 +83,15 @@ export default function Results() {
   const [resultInput, setResultInput] = useState({})
   const [panelCommentInput, setPanelCommentInput] = useState({})
   const [editPatient, setEditPatient] = useState(null)
+  const [savingPatient, setSavingPatient] = useState(false)
   const [barcodePatient, setBarcodePatient] = useState(null)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [deletingPatient, setDeletingPatient] = useState(false)
+  const [deleteTestConfirm, setDeleteTestConfirm] = useState(null)
+  const [deletePanelConfirm, setDeletePanelConfirm] = useState(null)
   const [editTest, setEditTest] = useState(null)
+  const [savingTestId, setSavingTestId] = useState(null)
+  const [finalizingPanel, setFinalizingPanel] = useState(null)
 
   useEffect(() => { fetchPatients() }, [])
 
@@ -75,87 +101,108 @@ export default function Results() {
     setLoading(false)
   }
 
-  // بيرجع { singleTests: [...], panelGroups: { instanceId: { panel_code, section groups, comment } } }
-  const splitTests = (patient) => {
-    const singleTests = []
-    const panelGroups = {}
-    ;(patient.tests || []).forEach(t => {
-      if (t.panel_instance_id) {
-        if (!panelGroups[t.panel_instance_id]) {
-          panelGroups[t.panel_instance_id] = { panel_code: t.panel_code, items: [], comment: t.comment || '' }
-        }
-        panelGroups[t.panel_instance_id].items.push(t)
-        if (t.comment) panelGroups[t.panel_instance_id].comment = t.comment
-      } else {
-        singleTests.push(t)
-      }
-    })
-    Object.values(panelGroups).forEach(g => {
-      g.items.sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
-    })
-    return { singleTests, panelGroups }
-  }
-
   const updateTest = async (testId, value, status) => {
-    await supabase.from('tests').update({ value, status }).eq('id', testId)
+    setSavingTestId(testId)
+    const { error } = await supabase.from('tests').update({ value, status }).eq('id', testId)
+    setSavingTestId(null)
+    if (error) {
+      showToast('حدث خطأ أثناء حفظ النتيجة: ' + error.message, 'error')
+      return
+    }
+    showToast('تم حفظ النتيجة', 'success')
     fetchPatients()
   }
 
-  const updatePanelItem = async (testId, patch) => {
-    await supabase.from('tests').update(patch).eq('id', testId)
-    fetchPatients()
-  }
-
-  const savePanelComment = async (instanceId, itemIds) => {
-    const comment = panelCommentInput[instanceId] ?? ''
-    await supabase.from('tests').update({ comment }).in('id', itemIds)
-    fetchPatients()
-  }
-
-  const deleteTest = async (testId) => {
-    if (!window.confirm('هتحذف التحليل ده؟')) return
-    await supabase.from('tests').delete().eq('id', testId)
-    fetchPatients()
-  }
-
-  const deletePanel = async (itemIds) => {
-    if (!window.confirm('هتحذف الباقة دي بكل بنودها؟')) return
-    await supabase.from('tests').delete().in('id', itemIds)
+  const confirmDeleteTest = async () => {
+    if (!deleteTestConfirm) return
+    const { error } = await supabase.from('tests').delete().eq('id', deleteTestConfirm.id)
+    setDeleteTestConfirm(null)
+    if (error) {
+      showToast('حدث خطأ أثناء حذف التحليل: ' + error.message, 'error')
+      return
+    }
+    showToast('تم حذف التحليل', 'success')
     fetchPatients()
   }
 
   const updateTestDetails = async () => {
-    await supabase.from('tests').update({
+    setSavingTestId(editTest.id)
+    const { error } = await supabase.from('tests').update({
       name: editTest.name,
       normal_range: editTest.normal_range,
       unit: editTest.unit,
     }).eq('id', editTest.id)
+    setSavingTestId(null)
+    if (error) {
+      showToast('حدث خطأ أثناء حفظ التعديل: ' + error.message, 'error')
+      return
+    }
     setEditTest(null)
+    showToast('تم تعديل بيانات التحليل', 'success')
     fetchPatients()
   }
 
-  const deletePatient = async (id) => {
-    await supabase.from('tests').delete().eq('patient_id', id)
-    await supabase.from('patients').delete().eq('id', id)
+  const confirmDeletePatient = async () => {
+    if (!deleteConfirm) return
+    setDeletingPatient(true)
+    await supabase.from('tests').delete().eq('patient_id', deleteConfirm.id)
+    const { error } = await supabase.from('patients').delete().eq('id', deleteConfirm.id)
+    setDeletingPatient(false)
+    if (error) {
+      showToast('حدث خطأ أثناء حذف المريض: ' + error.message, 'error')
+      return
+    }
+    showToast('تم حذف المريض وكل تحاليله', 'success')
     setDeleteConfirm(null)
     setSelected(null)
     fetchPatients()
   }
 
   const updatePatient = async () => {
-    await supabase.from('patients').update({
+    setSavingPatient(true)
+    const { error } = await supabase.from('patients').update({
       name: editPatient.name,
       age: parseInt(editPatient.age),
       gender: editPatient.gender,
       phone: editPatient.phone,
       doctor: editPatient.doctor,
     }).eq('id', editPatient.id)
+    setSavingPatient(false)
+    if (error) {
+      showToast('حدث خطأ أثناء حفظ التعديلات: ' + error.message, 'error')
+      return
+    }
+    showToast('تم تعديل بيانات المريض', 'success')
     setEditPatient(null)
     fetchPatients()
   }
 
+  const confirmDeletePanel = async () => {
+    if (!deletePanelConfirm) return
+    const ids = deletePanelConfirm.items.map(i => i.id)
+    const { error } = await supabase.from('tests').delete().in('id', ids)
+    setDeletePanelConfirm(null)
+    if (error) {
+      showToast('حدث خطأ أثناء حذف الباقة: ' + error.message, 'error')
+      return
+    }
+    showToast('تم حذف الباقة بكل بنودها', 'success')
+    fetchPatients()
+  }
+
+  const savePanelComment = async (instanceId, itemIds) => {
+    const comment = panelCommentInput[instanceId] ?? ''
+    const { error } = await supabase.from('tests').update({ comment }).in('id', itemIds)
+    if (error) {
+      showToast('حدث خطأ أثناء حفظ التعليق: ' + error.message, 'error')
+      return
+    }
+    showToast('تم حفظ التعليق', 'success')
+    fetchPatients()
+  }
+
   const finalizePanel = async (items) => {
-    // اعتماد كل بنود الباقة دفعة واحدة بعد التأكد إن كل قيمة اتدخلت
+    setFinalizingPanel(items[0]?.panel_instance_id)
     for (const item of items) {
       const input = resultInput[item.id] || {}
       const relValue = input.relative_value ?? item.relative_value ?? ''
@@ -179,6 +226,8 @@ export default function Results() {
         }).eq('id', item.id)
       }
     }
+    setFinalizingPanel(null)
+    showToast('تم اعتماد نتائج الباقة بنجاح', 'success')
     fetchPatients()
   }
 
@@ -249,15 +298,15 @@ export default function Results() {
               </div>
             </div>
             <div className="flex gap-3 mt-5 justify-end">
-              <button onClick={() => setEditPatient(null)}
+              <button onClick={() => setEditPatient(null)} disabled={savingPatient}
                 className="px-4 py-2 rounded-lg text-sm"
                 style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
                 إلغاء
               </button>
-              <button onClick={updatePatient}
+              <button onClick={updatePatient} disabled={savingPatient}
                 className="px-4 py-2 rounded-lg text-sm text-white"
-                style={{ background: 'var(--primary-container)' }}>
-                حفظ التعديلات
+                style={{ background: 'var(--primary-container)', opacity: savingPatient ? 0.7 : 1 }}>
+                {savingPatient ? 'جاري الحفظ...' : 'حفظ التعديلات'}
               </button>
             </div>
           </div>
@@ -272,15 +321,61 @@ export default function Results() {
               هيتم حذف المريض <strong>{deleteConfirm.name}</strong> وكل تحاليله نهائياً. مش هترجع!
             </p>
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setDeleteConfirm(null)}
+              <button onClick={() => setDeleteConfirm(null)} disabled={deletingPatient}
                 className="px-4 py-2 rounded-lg text-sm"
                 style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
                 إلغاء
               </button>
-              <button onClick={() => deletePatient(deleteConfirm.id)}
+              <button onClick={confirmDeletePatient} disabled={deletingPatient}
+                className="px-4 py-2 rounded-lg text-sm text-white"
+                style={{ background: '#dc2626', opacity: deletingPatient ? 0.7 : 1 }}>
+                {deletingPatient ? 'جاري الحذف...' : 'حذف نهائي'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTestConfirm && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm" dir="rtl">
+            <h2 className="font-bold text-lg mb-2" style={{ color: '#dc2626' }}>⚠️ تأكيد الحذف</h2>
+            <p className="text-sm mb-5" style={{ color: 'var(--on-surface-variant)' }}>
+              هيتم حذف تحليل <strong>{deleteTestConfirm.name}</strong> نهائياً.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDeleteTestConfirm(null)}
+                className="px-4 py-2 rounded-lg text-sm"
+                style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+                إلغاء
+              </button>
+              <button onClick={confirmDeleteTest}
                 className="px-4 py-2 rounded-lg text-sm text-white"
                 style={{ background: '#dc2626' }}>
-                حذف نهائي
+                حذف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletePanelConfirm && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm" dir="rtl">
+            <h2 className="font-bold text-lg mb-2" style={{ color: '#dc2626' }}>⚠️ تأكيد الحذف</h2>
+            <p className="text-sm mb-5" style={{ color: 'var(--on-surface-variant)' }}>
+              هيتم حذف باقة <strong>{deletePanelConfirm.panel_code}</strong> بكل بنودها نهائياً.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDeletePanelConfirm(null)}
+                className="px-4 py-2 rounded-lg text-sm"
+                style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+                إلغاء
+              </button>
+              <button onClick={confirmDeletePanel}
+                className="px-4 py-2 rounded-lg text-sm text-white"
+                style={{ background: '#dc2626' }}>
+                حذف الباقة
               </button>
             </div>
           </div>
@@ -323,10 +418,10 @@ export default function Results() {
                 style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
                 إلغاء
               </button>
-              <button onClick={updateTestDetails}
+              <button onClick={updateTestDetails} disabled={savingTestId === editTest.id}
                 className="px-4 py-2 rounded-lg text-sm text-white"
-                style={{ background: 'var(--primary-container)' }}>
-                حفظ التعديلات
+                style={{ background: 'var(--primary-container)', opacity: savingTestId === editTest.id ? 0.7 : 1 }}>
+                {savingTestId === editTest.id ? 'جاري الحفظ...' : 'حفظ التعديلات'}
               </button>
             </div>
           </div>
@@ -338,11 +433,13 @@ export default function Results() {
       )}
 
       {loading ? (
-        <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>جاري التحميل...</div>
+        <LoadingSpinner label="جاري تحميل قائمة المرضى..." fullHeight />
       ) : filtered.length === 0 ? (
-        <div className="text-center py-10 text-sm" style={{ color: 'var(--on-surface-variant)' }}>
-          لا يوجد مرضى مطابقين
-        </div>
+        <EmptyState
+          icon="🔍"
+          title="لا يوجد مرضى مطابقين"
+          subtitle={search ? 'جرّب كلمة بحث مختلفة أو غيّر فلتر الفترة الزمنية' : 'لسه مفيش مرضى مسجلين في الفترة دي'}
+        />
       ) : (
         <div className="space-y-4">
           {filtered.map(p => {
@@ -397,7 +494,6 @@ export default function Results() {
                 {selected?.id === p.id && (
                   <div className="p-4 space-y-6">
 
-                    {/* الباقات (زي CBC) */}
                     {Object.entries(panelGroups).map(([instanceId, group]) => {
                       const bySection = {}
                       group.items.forEach(item => {
@@ -405,13 +501,14 @@ export default function Results() {
                         if (!bySection[sec]) bySection[sec] = []
                         bySection[sec].push(item)
                       })
-                      const itemIds = group.items.map(i => i.id)
+
+                      const isFinalizingThis = finalizingPanel === instanceId
 
                       return (
                         <div key={instanceId} className="rounded-xl overflow-hidden" style={{ border: '2px solid #1a2456' }}>
                           <div className="flex items-center justify-between px-4 py-2" style={{ background: '#1a2456' }}>
                             <span className="text-white text-sm font-bold">{group.panel_code}</span>
-                            <button onClick={() => deletePanel(itemIds)}
+                            <button onClick={() => setDeletePanelConfirm(group)}
                               className="text-xs px-2 py-1 rounded-lg text-white"
                               style={{ background: 'rgba(255,255,255,0.2)' }}>
                               🗑️ حذف الباقة
@@ -479,7 +576,6 @@ export default function Results() {
                               </div>
                             ))}
 
-                            {/* التعليق */}
                             <div className="mt-3">
                               <label className="text-xs font-semibold block mb-1" style={{ color: 'var(--on-surface)' }}>تعليق (Comment)</label>
                               <textarea rows={2} defaultValue={group.comment}
@@ -490,15 +586,22 @@ export default function Results() {
                             </div>
 
                             <div className="flex gap-2 mt-3 justify-end">
-                              <button onClick={() => savePanelComment(instanceId, itemIds)}
+                              <button onClick={() => savePanelComment(instanceId, group.items.map(i => i.id))}
                                 className="px-3 py-1.5 rounded-lg text-xs font-medium"
                                 style={{ background: '#e8f0fe', color: 'var(--primary-container)' }}>
                                 حفظ التعليق
                               </button>
-                              <button onClick={() => finalizePanel(group.items)}
-                                className="px-3 py-1.5 rounded-lg text-xs text-white font-medium"
-                                style={{ background: '#065f46' }}>
-                                ✅ اعتماد نتائج الباقة
+                              <button onClick={() => finalizePanel(group.items)} disabled={isFinalizingThis}
+                                className="px-3 py-1.5 rounded-lg text-xs text-white font-medium flex items-center gap-2"
+                                style={{ background: '#065f46', opacity: isFinalizingThis ? 0.7 : 1 }}>
+                                {isFinalizingThis && (
+                                  <span style={{
+                                    width: '11px', height: '11px', border: '2px solid rgba(255,255,255,0.4)',
+                                    borderTopColor: 'white', borderRadius: '50%', display: 'inline-block',
+                                    animation: 'lab-results-spin 0.7s linear infinite',
+                                  }} />
+                                )}
+                                {isFinalizingThis ? 'جاري الاعتماد...' : '✅ اعتماد نتائج الباقة'}
                               </button>
                             </div>
                           </div>
@@ -506,7 +609,6 @@ export default function Results() {
                       )
                     })}
 
-                    {/* التحاليل المفردة */}
                     {singleTests.length > 0 && (
                       <table className="w-full">
                         <thead>
@@ -553,17 +655,17 @@ export default function Results() {
                                     const manualStage = resultInput[t.id]?.stage ?? t.status ?? 'تم التجميع'
                                     const status = value.trim() !== '' ? 'معتمد' : (manualStage === 'معتمد' ? 'قيد التحليل' : manualStage)
                                     updateTest(t.id, value, status)
-                                  }}
+                                  }} disabled={savingTestId === t.id}
                                     className="px-3 py-1 rounded-lg text-xs text-white font-medium"
-                                    style={{ background: 'var(--primary-container)' }}>
-                                    حفظ
+                                    style={{ background: 'var(--primary-container)', opacity: savingTestId === t.id ? 0.7 : 1 }}>
+                                    {savingTestId === t.id ? '...' : 'حفظ'}
                                   </button>
                                   <button onClick={() => setEditTest(t)}
                                     className="px-3 py-1 rounded-lg text-xs font-medium"
                                     style={{ background: '#e8f0fe', color: 'var(--primary-container)' }}>
                                     ✏️
                                   </button>
-                                  <button onClick={() => deleteTest(t.id)}
+                                  <button onClick={() => setDeleteTestConfirm(t)}
                                     className="px-3 py-1 rounded-lg text-xs font-medium"
                                     style={{ background: '#fee2e2', color: '#dc2626' }}>
                                     🗑️
@@ -582,6 +684,11 @@ export default function Results() {
           })}
         </div>
       )}
+      <style>{`
+        @keyframes lab-results-spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   )
 }
