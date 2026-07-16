@@ -23,6 +23,24 @@ const periodFilters = [
   { key: 'older', label: 'قبل ذلك' },
 ]
 
+const SECTION_LABELS = { RBC: 'RBC', Platelet: 'Platelet', WBC: 'WBC', WBC_DIFF: 'WBC - Diff' }
+
+const HISTORY_COLUMNS = [
+  { key: 'WBCs - Total', label: 'WBCs' },
+  { key: 'Neutrophil', label: 'Neut', abs: true },
+  { key: 'Lymphocytes', label: 'Lymp', abs: true },
+  { key: 'Monocytes', label: 'Mono', abs: true },
+  { key: 'Eosinophil', label: 'Eosin', abs: true },
+  { key: 'Basophil', label: 'Baso', abs: true },
+  { key: 'RBCs Count', label: 'RBCs' },
+  { key: 'Haemoglobin', label: 'Hgb' },
+  { key: 'HCT', label: 'Hct' },
+  { key: 'MCV', label: 'MCV' },
+  { key: 'MCH', label: 'MCH' },
+  { key: 'MCHC', label: 'MCHC' },
+  { key: 'Platelet Count', label: 'PLT' },
+]
+
 const getBucket = (dateStr) => {
   const date = new Date(dateStr)
   const now = new Date()
@@ -37,6 +55,28 @@ const getBucket = (dateStr) => {
   return 'older'
 }
 
+const splitTests = (patient) => {
+  const singleTests = []
+  const panelGroups = {}
+  const allTests = patient.tests || []
+  for (let i = 0; i < allTests.length; i++) {
+    const t = allTests[i]
+    if (t.panel_instance_id) {
+      if (!panelGroups[t.panel_instance_id]) {
+        panelGroups[t.panel_instance_id] = { panel_code: t.panel_code, items: [], comment: t.comment || '' }
+      }
+      panelGroups[t.panel_instance_id].items.push(t)
+      if (t.comment) panelGroups[t.panel_instance_id].comment = t.comment
+    } else {
+      singleTests.push(t)
+    }
+  }
+  Object.keys(panelGroups).forEach(key => {
+    panelGroups[key].items.sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+  })
+  return { singleTests, panelGroups }
+}
+
 export default function Reports() {
   const location = useLocation()
   const [patients, setPatients] = useState([])
@@ -44,6 +84,7 @@ export default function Reports() {
   const [search, setSearch] = useState('')
   const [periodFilter, setPeriodFilter] = useState('all')
   const [selectedPatient, setSelectedPatient] = useState(null)
+  const [historyRows, setHistoryRows] = useState([])
   const [settings, setSettings] = useState(null)
   const [design, setDesign] = useState({
     report_header_color: '#1a2456',
@@ -69,6 +110,14 @@ export default function Reports() {
       if (match) setSelectedPatient(match)
     }
   }, [loading, patients, location.state])
+
+  useEffect(() => {
+    if (selectedPatient) {
+      fetchHistory(selectedPatient)
+    } else {
+      setHistoryRows([])
+    }
+  }, [selectedPatient])
 
   const fetchPatients = async () => {
     const { data } = await supabase
@@ -97,6 +146,30 @@ export default function Reports() {
     }
   }
 
+  const fetchHistory = async (patient) => {
+    if (!patient.phone) { setHistoryRows([]); return }
+
+    const { data } = await supabase
+      .from('patients')
+      .select('id, created_at, tests(*)')
+      .eq('phone', patient.phone)
+      .neq('id', patient.id)
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    const rows = []
+    const list = data || []
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i]
+      const cbcTests = (p.tests || []).filter(t => t.panel_code === 'CBC')
+      if (cbcTests.length === 0) continue
+      const byName = {}
+      cbcTests.forEach(t => { byName[t.name] = t })
+      rows.push({ date: p.created_at, byName })
+    }
+    setHistoryRows(rows)
+  }
+
   const saveDesign = async () => {
     setSavingDesign(true)
     const { data: { user } } = await supabase.auth.getUser()
@@ -115,12 +188,25 @@ export default function Reports() {
 
   const groupedTests = (patient) => {
     const groups = {}
-    patient.tests?.forEach(t => {
+    const singles = (patient.tests || []).filter(t => !t.panel_instance_id)
+    singles.forEach(t => {
       const cat = t.category || 'General'
       if (!groups[cat]) groups[cat] = []
       groups[cat].push(t)
     })
     return groups
+  }
+
+  // بيحسب التكلفة الإجمالية للتحاليل: كل تحليل مفرد بسعره + كل باقة بسعرها مرة واحدة (مش لكل بند جواها)
+  const computeTotalCost = (patient) => {
+    const { singleTests, panelGroups } = splitTests(patient)
+    let total = 0
+    singleTests.forEach(t => { total += parseFloat(t.price) || 0 })
+    Object.values(panelGroups).forEach(group => {
+      const panelPrice = group.items && group.items[0] ? group.items[0].price : 0
+      total += parseFloat(panelPrice) || 0
+    })
+    return total
   }
 
   const calcResultStatus = (value, range) => {
@@ -129,10 +215,122 @@ export default function Reports() {
     const matches = String(range).match(/-?\d+(\.\d+)?/g)
     if (!matches || matches.length < 2) return null
     const nums = matches.map(parseFloat).sort((a, b) => a - b)
-    const [low, high] = nums
+    const low = nums[0]
+    const high = nums[1]
     if (num > high) return 'مرتفع'
     if (num < low) return 'منخفض'
     return 'طبيعي'
+  }
+
+  const buildPanelHtml = (group, colors, fontSize) => {
+    const hc = colors.hc
+    const tc = colors.tc
+    const ttc = colors.ttc
+    const rHigh = colors.rHigh
+    const rLow = colors.rLow
+    const rNormal = colors.rNormal
+
+    const bySection = {}
+    group.items.forEach(item => {
+      const sec = item.section || 'أخرى'
+      if (!bySection[sec]) bySection[sec] = []
+      bySection[sec].push(item)
+    })
+
+    const flagColor = (flag) => {
+      if (flag === 'H') return rHigh
+      if (flag === 'L') return rLow
+      return rNormal
+    }
+
+    let sectionsHtml = ''
+    const sectionKeys = Object.keys(bySection)
+    for (let s = 0; s < sectionKeys.length; s++) {
+      const section = sectionKeys[s]
+      const items = bySection[section]
+      const isDiff = section === 'WBC_DIFF'
+
+      let rowsHtml = ''
+      items.forEach(item => {
+        if (isDiff) {
+          const flagLabel = item.flag ? ('<b>' + item.flag + '</b> ') : ''
+          rowsHtml += '<tr>' +
+            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + ttc + ';">' + item.name + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + flagColor(item.flag) + '; font-weight:' + (item.flag ? 'bold' : 'normal') + ';">' + flagLabel + (item.relative_value || '---') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + (item.normal_range || '') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + flagColor(item.flag) + '; font-weight:' + (item.flag ? 'bold' : 'normal') + ';">' + flagLabel + (item.absolute_value || '---') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + (item.absolute_range || '') + '</td>' +
+            '</tr>'
+        } else {
+          const flagLabel = item.flag ? ('<b>' + item.flag + '</b> ') : ''
+          rowsHtml += '<tr>' +
+            '<td colspan="2" style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + ttc + ';"><strong>' + item.name + '</strong></td>' +
+            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + flagColor(item.flag) + '; font-weight:' + (item.flag ? 'bold' : 'normal') + ';">' + flagLabel + (item.value || '---') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + (item.unit || '') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + (item.normal_range || '') + '</td>' +
+            '</tr>'
+        }
+      })
+
+      let header
+      if (isDiff) {
+        header = '<tr style="background:' + tc + '12;">' +
+          '<td style="padding:4px 8px; font-weight:bold; font-size:' + fontSize + 'px; color:' + tc + ';">' + SECTION_LABELS[section] + '</td>' +
+          '<td colspan="2" style="padding:4px 8px; font-weight:bold; font-size:' + (fontSize - 1) + 'px; color:' + tc + '; text-align:center;">Relative %</td>' +
+          '<td colspan="2" style="padding:4px 8px; font-weight:bold; font-size:' + (fontSize - 1) + 'px; color:' + tc + '; text-align:center;">Absolute</td>' +
+          '</tr>'
+      } else {
+        header = '<tr style="background:' + tc + '12;">' +
+          '<td colspan="5" style="padding:4px 8px; font-weight:bold; font-size:' + fontSize + 'px; color:' + tc + ';">■ ' + (SECTION_LABELS[section] || section) + '</td>' +
+          '</tr>'
+      }
+
+      sectionsHtml += '<table style="width:100%; border-collapse:collapse; margin-bottom:4px;">' + header + rowsHtml + '</table>'
+      if (s < sectionKeys.length - 1) {
+        sectionsHtml += '<div style="border-bottom:1px dashed #ccc; margin:4px 0;"></div>'
+      }
+    }
+
+    let commentHtml = ''
+    if (group.comment) {
+      commentHtml = '<div style="margin-top:8px; padding:6px 8px; background:#f8f9fa; border-right:3px solid ' + tc + '; font-size:' + (fontSize - 1) + 'px; color:#333;">' +
+        '<strong style="color:' + tc + ';">Comment: </strong>' + group.comment +
+        '</div>'
+    }
+
+    return '<div style="border:2px solid ' + hc + '; border-radius:6px; overflow:hidden; margin-bottom:10px;">' +
+      '<div style="background:' + hc + '; color:white; text-align:center; padding:5px; font-size:' + (fontSize + 1) + 'px; font-weight:bold; letter-spacing:1px;">COMPLETE BLOOD COUNT</div>' +
+      '<div style="padding:6px 10px;">' + sectionsHtml + commentHtml + '</div>' +
+      '</div>'
+  }
+
+  const buildHistoryHtml = (colors, rows, fontSize) => {
+    if (!rows.length) return ''
+    const tc = colors.tc
+
+    let headerCells = ''
+    HISTORY_COLUMNS.forEach(c => {
+      headerCells += '<th style="padding:3px 5px; font-size:9px; border:1px solid #ccc; background:#f0f0f0;">' + c.label + '</th>'
+    })
+
+    let rowsHtml = ''
+    rows.forEach(row => {
+      const dateStr = new Date(row.date).toLocaleDateString('en-GB')
+      let cells = ''
+      HISTORY_COLUMNS.forEach(c => {
+        const item = row.byName[c.key]
+        const val = c.abs ? (item ? item.absolute_value : '-') : (item ? item.value : '-')
+        cells += '<td style="padding:3px 5px; font-size:9px; border:1px solid #ccc; text-align:center;">' + (val || '-') + '</td>'
+      })
+      rowsHtml += '<tr><td style="padding:3px 5px; font-size:9px; border:1px solid #ccc; font-weight:bold;">' + dateStr + '</td>' + cells + '</tr>'
+    })
+
+    return '<div style="margin-top:10px;">' +
+      '<div style="font-size:' + fontSize + 'px; font-weight:bold; color:' + tc + '; margin-bottom:4px;">Patient History In Our Lab</div>' +
+      '<table style="width:100%; border-collapse:collapse;">' +
+      '<thead><tr><th style="padding:3px 5px; font-size:9px; border:1px solid #ccc; background:#f0f0f0;"></th>' + headerCells + '</tr></thead>' +
+      '<tbody>' + rowsHtml + '</tbody>' +
+      '</table></div>'
   }
 
   const printReport = () => {
@@ -171,10 +369,15 @@ export default function Reports() {
     const rNormal = design.report_result_normal_color
     const rHigh = design.report_result_high_color
     const rLow = design.report_result_low_color
+    const colors = { hc, tc, ttc, rNormal, rHigh, rLow }
+
     const genderText = selectedPatient.gender === 'ذكر' ? 'Male' : 'Female'
     const printDate = new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const visitDate = new Date(selectedPatient.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const groups = groupedTests(selectedPatient)
+    const splitResult = splitTests(selectedPatient)
+    const singleTests = splitResult.singleTests
+    const panelGroups = splitResult.panelGroups
     const doctorName = settings?.doctor_name || 'اسم الطبيب'
 
     const tableRows = Object.entries(groups).map(([category, tests]) => `
@@ -200,6 +403,26 @@ export default function Reports() {
         `
       }).join('')}
     `).join('')
+
+    let panelsHtml = ''
+    Object.values(panelGroups).forEach(g => {
+      panelsHtml += buildPanelHtml(g, colors, fs)
+    })
+
+    const historyHtml = Object.keys(panelGroups).length > 0 ? buildHistoryHtml(colors, historyRows, fs) : ''
+
+    const singleTableHtml = singleTests.length > 0 ? `
+      <table style="width:100%; border-collapse:collapse; margin-bottom:5px;">
+        <thead>
+          <tr style="background:#f0f0f0;">
+            <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:35%;">Test Name</th>
+            <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:20%;">Result</th>
+            <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:15%;">Unit</th>
+            <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:30%;">Reference range</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>` : ''
 
     const html = `
       <html dir="ltr">
@@ -236,17 +459,11 @@ export default function Reports() {
           ${barcodeHtml}
         </div>
         <hr style="border:none; border-top:1px solid #ccc; margin:8px 0;" />
-        <table style="width:100%; border-collapse:collapse; margin-bottom:5px;">
-          <thead>
-            <tr style="background:#f0f0f0;">
-              <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:35%;">Test Name</th>
-              <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:20%;">Result</th>
-              <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:15%;">Unit</th>
-              <th style="padding:7px 10px; text-align:left; font-size:${fs}px; font-weight:bold; color:#333; border-bottom:2px solid ${tc}; border-top:1px solid #ddd; width:30%;">Reference range</th>
-            </tr>
-          </thead>
-          <tbody>${tableRows}</tbody>
-        </table>
+
+        ${panelsHtml}
+        ${historyHtml}
+        ${singleTableHtml}
+
         <div style="margin-top:25px; display:flex; justify-content:space-between; align-items:flex-end; padding-top:12px; border-top:2px solid ${hc};">
           <div style="width:100px; height:65px; border:2px dashed ${hc}; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:${fs}px; color:${hc}; font-weight:bold; direction:rtl;">
             ختم المعمل
@@ -267,6 +484,122 @@ export default function Reports() {
     }
   }
 
+  const PreviewPanel = ({ group, colors }) => {
+    const hc = colors.hc
+    const tc = colors.tc
+    const ttc = colors.ttc
+    const rHigh = colors.rHigh
+    const rLow = colors.rLow
+    const rNormal = colors.rNormal
+
+    const bySection = {}
+    group.items.forEach(item => {
+      const sec = item.section || 'أخرى'
+      if (!bySection[sec]) bySection[sec] = []
+      bySection[sec].push(item)
+    })
+
+    const flagColor = (flag) => {
+      if (flag === 'H') return rHigh
+      if (flag === 'L') return rLow
+      return rNormal
+    }
+
+    return (
+      <div style={{ border: `2px solid ${hc}`, borderRadius: '6px', overflow: 'hidden', marginBottom: '10px' }}>
+        <div style={{ background: hc, color: 'white', textAlign: 'center', padding: '5px', fontSize: `${fs + 1}px`, fontWeight: 'bold', letterSpacing: '1px' }}>
+          COMPLETE BLOOD COUNT
+        </div>
+        <div style={{ padding: '6px 10px' }}>
+          {Object.entries(bySection).map(([section, items]) => {
+            const isDiff = section === 'WBC_DIFF'
+            return (
+              <div key={section}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '4px' }}>
+                  <tbody>
+                    <tr style={{ background: `${tc}12` }}>
+                      {isDiff ? (
+                        <>
+                          <td style={{ padding: '4px 8px', fontWeight: 'bold', fontSize: `${fs}px`, color: tc }}>{SECTION_LABELS[section]}</td>
+                          <td colSpan={2} style={{ padding: '4px 8px', fontWeight: 'bold', fontSize: `${fs - 1}px`, color: tc, textAlign: 'center' }}>Relative %</td>
+                          <td colSpan={2} style={{ padding: '4px 8px', fontWeight: 'bold', fontSize: `${fs - 1}px`, color: tc, textAlign: 'center' }}>Absolute</td>
+                        </>
+                      ) : (
+                        <td colSpan={5} style={{ padding: '4px 8px', fontWeight: 'bold', fontSize: `${fs}px`, color: tc }}>■ {SECTION_LABELS[section] || section}</td>
+                      )}
+                    </tr>
+                    {items.map(item => isDiff ? (
+                      <tr key={item.id}>
+                        <td style={{ padding: '3px 8px', fontSize: `${fs}px`, color: ttc }}>{item.name}</td>
+                        <td style={{ padding: '3px 8px', fontSize: `${fs}px`, color: flagColor(item.flag), fontWeight: item.flag ? 'bold' : 'normal' }}>
+                          {item.flag ? <b>{item.flag} </b> : null}{item.relative_value || '---'}
+                        </td>
+                        <td style={{ padding: '3px 8px', fontSize: `${fs - 1}px`, color: '#666' }}>{item.normal_range || ''}</td>
+                        <td style={{ padding: '3px 8px', fontSize: `${fs}px`, color: flagColor(item.flag), fontWeight: item.flag ? 'bold' : 'normal' }}>
+                          {item.flag ? <b>{item.flag} </b> : null}{item.absolute_value || '---'}
+                        </td>
+                        <td style={{ padding: '3px 8px', fontSize: `${fs - 1}px`, color: '#666' }}>{item.absolute_range || ''}</td>
+                      </tr>
+                    ) : (
+                      <tr key={item.id}>
+                        <td colSpan={2} style={{ padding: '3px 8px', fontSize: `${fs}px`, color: ttc, fontWeight: 'bold' }}>{item.name}</td>
+                        <td style={{ padding: '3px 8px', fontSize: `${fs}px`, color: flagColor(item.flag), fontWeight: item.flag ? 'bold' : 'normal' }}>
+                          {item.flag ? <b>{item.flag} </b> : null}{item.value || '---'}
+                        </td>
+                        <td style={{ padding: '3px 8px', fontSize: `${fs - 1}px`, color: '#666' }}>{item.unit || ''}</td>
+                        <td style={{ padding: '3px 8px', fontSize: `${fs - 1}px`, color: '#666' }}>{item.normal_range || ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ borderBottom: '1px dashed #ccc', margin: '4px 0' }} />
+              </div>
+            )
+          })}
+          {group.comment && (
+            <div style={{ marginTop: '8px', padding: '6px 8px', background: '#f8f9fa', borderRight: `3px solid ${tc}`, fontSize: `${fs - 1}px`, color: '#333' }}>
+              <strong style={{ color: tc }}>Comment: </strong>{group.comment}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const PreviewHistory = ({ colors, rows }) => {
+    if (!rows.length) return null
+    const tc = colors.tc
+    return (
+      <div style={{ marginTop: '10px' }}>
+        <div style={{ fontSize: `${fs}px`, fontWeight: 'bold', color: tc, marginBottom: '4px' }}>Patient History In Our Lab</div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ padding: '3px 5px', fontSize: '9px', border: '1px solid #ccc', background: '#f0f0f0' }}></th>
+              {HISTORY_COLUMNS.map(c => (
+                <th key={c.key} style={{ padding: '3px 5px', fontSize: '9px', border: '1px solid #ccc', background: '#f0f0f0' }}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i}>
+                <td style={{ padding: '3px 5px', fontSize: '9px', border: '1px solid #ccc', fontWeight: 'bold' }}>
+                  {new Date(row.date).toLocaleDateString('en-GB')}
+                </td>
+                {HISTORY_COLUMNS.map(c => {
+                  const item = row.byName[c.key]
+                  const val = c.abs ? (item ? item.absolute_value : '-') : (item ? item.value : '-')
+                  return <td key={c.key} style={{ padding: '3px 5px', fontSize: '9px', border: '1px solid #ccc', textAlign: 'center' }}>{val || '-'}</td>
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   const PreviewReport = ({ patient }) => {
     if (!patient || !settings) return null
 
@@ -281,6 +614,9 @@ export default function Reports() {
     })
     const genderText = patient.gender === 'ذكر' ? 'Male' : patient.gender === 'أنثى' ? 'Female' : patient.gender || '-'
     const groups = groupedTests(patient)
+    const splitResult = splitTests(patient)
+    const singleTests = splitResult.singleTests
+    const panelGroups = splitResult.panelGroups
 
     const hc = design.report_header_color
     const tc = design.report_table_color
@@ -289,6 +625,7 @@ export default function Reports() {
     const rHigh = design.report_result_high_color
     const rLow = design.report_result_low_color
     const bc = design.report_barcode_color
+    const colors = { hc, tc, ttc, rNormal, rHigh, rLow }
 
     return (
       <div style={{ fontFamily: 'Arial, sans-serif', fontSize: `${fs}px`, color: '#000', background: 'white', padding: '20px 25px' }}>
@@ -335,47 +672,55 @@ export default function Reports() {
 
         <hr style={{ border: 'none', borderTop: '1px solid #ccc', margin: '8px 0' }} />
 
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '5px' }}>
-          <thead>
-            <tr style={{ background: '#f0f0f0' }}>
-              {['Test Name', 'Result', 'Unit', 'Reference range'].map((h, i) => (
-                <th key={i} style={{
-                  padding: '7px 10px', textAlign: 'left', fontSize: `${fs}px`,
-                  fontWeight: 'bold', color: '#333',
-                  borderBottom: `2px solid ${tc}`, borderTop: '1px solid #ddd',
-                  width: i === 0 ? '35%' : i === 1 ? '20%' : i === 2 ? '15%' : '30%'
-                }}>{h}</th>
+        {Object.values(panelGroups).map((group, i) => (
+          <PreviewPanel key={i} group={group} colors={colors} />
+        ))}
+
+        {Object.keys(panelGroups).length > 0 && <PreviewHistory colors={colors} rows={historyRows} />}
+
+        {singleTests.length > 0 && (
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px', marginBottom: '5px' }}>
+            <thead>
+              <tr style={{ background: '#f0f0f0' }}>
+                {['Test Name', 'Result', 'Unit', 'Reference range'].map((h, i) => (
+                  <th key={i} style={{
+                    padding: '7px 10px', textAlign: 'left', fontSize: `${fs}px`,
+                    fontWeight: 'bold', color: '#333',
+                    borderBottom: `2px solid ${tc}`, borderTop: '1px solid #ddd',
+                    width: i === 0 ? '35%' : i === 1 ? '20%' : i === 2 ? '15%' : '30%'
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(groups).map(([category, tests]) => (
+                <Fragment key={category}>
+                  <tr style={{ background: `${tc}18` }}>
+                    <td colSpan={4} style={{
+                      padding: '6px 10px', fontWeight: 'bold', fontSize: `${fs + 1}px`,
+                      color: tc, borderTop: `1px solid ${tc}40`, borderBottom: `1px solid ${tc}40`
+                    }}>■ {category}</td>
+                  </tr>
+                  {tests.map((t, ti) => {
+                    const computedStatus = calcResultStatus(t.value, t.normal_range) || t.status
+                    return (
+                      <tr key={ti} style={{ background: ti % 2 === 0 ? 'white' : '#fafafa' }}>
+                        <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>■ {t.name}</td>
+                        <td style={{
+                          padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee',
+                          color: computedStatus === 'مرتفع' ? rHigh : computedStatus === 'منخفض' ? rLow : rNormal,
+                          fontWeight: (computedStatus === 'مرتفع' || computedStatus === 'منخفض') ? 'bold' : 'normal'
+                        }}>{t.value || '---'}</td>
+                        <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.unit || ''}</td>
+                        <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.normal_range || '---'}</td>
+                      </tr>
+                    )
+                  })}
+                </Fragment>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(groups).map(([category, tests]) => (
-              <Fragment key={category}>
-                <tr style={{ background: `${tc}18` }}>
-                  <td colSpan={4} style={{
-                    padding: '6px 10px', fontWeight: 'bold', fontSize: `${fs + 1}px`,
-                    color: tc, borderTop: `1px solid ${tc}40`, borderBottom: `1px solid ${tc}40`
-                  }}>■ {category}</td>
-                </tr>
-                {tests.map((t, ti) => {
-                  const computedStatus = calcResultStatus(t.value, t.normal_range) || t.status
-                  return (
-                    <tr key={ti} style={{ background: ti % 2 === 0 ? 'white' : '#fafafa' }}>
-                      <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>■ {t.name}</td>
-                      <td style={{
-                        padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee',
-                        color: computedStatus === 'مرتفع' ? rHigh : computedStatus === 'منخفض' ? rLow : rNormal,
-                        fontWeight: (computedStatus === 'مرتفع' || computedStatus === 'منخفض') ? 'bold' : 'normal'
-                      }}>{t.value || '---'}</td>
-                      <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.unit || ''}</td>
-                      <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.normal_range || '---'}</td>
-                    </tr>
-                  )
-                })}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        )}
 
         <div style={{ marginTop: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingTop: '12px', borderTop: `2px solid ${hc}` }}>
           <div style={{ width: '100px', height: '65px', border: `2px dashed ${hc}`, borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: `${fs}px`, color: hc, fontWeight: 'bold', direction: 'rtl' }}>
@@ -459,7 +804,7 @@ export default function Reports() {
                       {patient.tests?.map((t, i) => (
                         <tr key={i} style={{ borderTop: '1px solid var(--outline-variant)' }}>
                           <td className="p-3 text-sm font-medium" style={{ color: 'var(--on-surface)' }}>{t.name}</td>
-                          <td className="p-3 text-sm" style={{ color: 'var(--on-surface)' }}>{t.value || '-'}</td>
+                          <td className="p-3 text-sm" style={{ color: 'var(--on-surface)' }}>{t.value || t.relative_value || '-'}</td>
                           <td className="p-3">
                             <span className="text-xs font-medium px-2 py-1 rounded-full"
                               style={{ background: resultColor[t.status]?.bg || '#fef3c7', color: resultColor[t.status]?.color || '#92400e' }}>
@@ -526,6 +871,20 @@ export default function Reports() {
               style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
               ← رجوع
             </button>
+          </div>
+
+          {/* صندوق التكلفة - للدكتور فقط، لا يظهر في الطباعة أبدًا */}
+          <div className="bg-white rounded-xl p-4 flex-shrink-0" style={{ width: '200px', border: '1px solid var(--outline-variant)', position: 'sticky', top: '20px' }}>
+            <h3 className="font-semibold text-sm mb-3" style={{ color: 'var(--on-surface)' }}>💰 التكلفة الإجمالية</h3>
+            <div className="text-center py-3 rounded-lg" style={{ background: '#f0fdf4' }}>
+              <span className="text-2xl font-bold" style={{ color: '#065f46' }}>
+                {computeTotalCost(selectedPatient).toLocaleString('ar-EG')}
+              </span>
+              <span className="text-sm mr-1" style={{ color: '#065f46' }}>جنيه</span>
+            </div>
+            <p className="text-xs mt-2" style={{ color: 'var(--on-surface-variant)' }}>
+              هذا المبلغ للاستخدام الداخلي فقط ولا يظهر عند طباعة التقرير.
+            </p>
           </div>
 
           <div className="flex-1 bg-white rounded-xl overflow-hidden" style={{ border: '1px solid var(--outline-variant)' }}>
