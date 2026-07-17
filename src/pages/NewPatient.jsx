@@ -2,9 +2,11 @@
 import { supabase } from '../supabase'
 import BarcodeLabel from '../components/BarcodeLabel'
 import { useToast } from '../components/Toast'
+import useUnsavedChanges from '../hooks/useUnsavedChanges'
 
 export default function NewPatient() {
   const showToast = useToast()
+  useUnsavedChanges(!!(form.name.trim() || form.phone.trim() || selectedTests.length > 0 || selectedPanels.length > 0))
   const [form, setForm] = useState({ name: '', phone: '', age: '', birth_date: '', gender: '', doctor: '', notes: '' })
   const [testCatalog, setTestCatalog] = useState([])
   const [panels, setPanels] = useState([])
@@ -511,3 +513,4 @@ export default function NewPatient() {
     </div>
   )
 }
+

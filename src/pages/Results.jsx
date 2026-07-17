@@ -142,20 +142,29 @@ export default function Results() {
     fetchPatients()
   }
 
-  const confirmDeletePatient = async () => {
+  const confirmDeletePatient = () => {
     if (!deleteConfirm) return
-    setDeletingPatient(true)
-    await supabase.from('tests').delete().eq('patient_id', deleteConfirm.id)
-    const { error } = await supabase.from('patients').delete().eq('id', deleteConfirm.id)
-    setDeletingPatient(false)
-    if (error) {
-      showToast('حدث خطأ أثناء حذف المريض: ' + error.message, 'error')
-      return
-    }
-    showToast('تم حذف المريض وكل تحاليله', 'success')
+    const patientId = deleteConfirm.id
+    const patientName = deleteConfirm.name
     setDeleteConfirm(null)
     setSelected(null)
-    fetchPatients()
+
+    let cancelled = false
+    const timeoutId = setTimeout(async () => {
+      if (cancelled) return
+      await supabase.from('tests').delete().eq('patient_id', patientId)
+      await supabase.from('patients').delete().eq('id', patientId)
+      fetchPatients()
+    }, 5000)
+
+    showToast('هيتم حذف المريض "' + patientName + '" خلال 5 ثواني', 'warning', 5200, {
+      label: 'تراجع',
+      onClick: () => {
+        cancelled = true
+        clearTimeout(timeoutId)
+        showToast('تم التراجع عن الحذف', 'success')
+      }
+    })
   }
 
   const updatePatient = async () => {
@@ -692,3 +701,4 @@ export default function Results() {
     </div>
   )
 }
+

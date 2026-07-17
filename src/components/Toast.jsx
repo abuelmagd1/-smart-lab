@@ -18,11 +18,11 @@ export function ToastProvider({ children }) {
     setToasts(prev => prev.filter(t => t.id !== id))
   }, [])
 
-  const showToast = useCallback((message, type, duration) => {
+  const showToast = useCallback((message, type, duration, action) => {
     const finalType = type || 'info'
     const finalDuration = duration || 3500
     const id = ++idCounter
-    setToasts(prev => [...prev, { id, message, type: finalType }])
+    setToasts(prev => [...prev, { id, message, type: finalType, action: action || null }])
     setTimeout(() => removeToast(id), finalDuration)
     return id
   }, [removeToast])
@@ -39,7 +39,7 @@ export function ToastProvider({ children }) {
           display: 'flex',
           flexDirection: 'column-reverse',
           gap: '10px',
-          maxWidth: '360px',
+          maxWidth: '380px',
           pointerEvents: 'none',
         }}
         dir="rtl"
@@ -64,6 +64,23 @@ export function ToastProvider({ children }) {
               }}>
               <span style={{ flexShrink: 0 }}>{s.icon}</span>
               <span style={{ flex: 1, lineHeight: 1.4 }}>{t.message}</span>
+              {t.action && (
+                <button onClick={() => { t.action.onClick(); removeToast(t.id) }}
+                  style={{
+                    background: 'rgba(0,0,0,0.08)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    color: s.color,
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    padding: '5px 10px',
+                    flexShrink: 0,
+                    whiteSpace: 'nowrap',
+                  }}>
+                  {t.action.label}
+                </button>
+              )}
               <button onClick={() => removeToast(t.id)}
                 aria-label="إغلاق التنبيه"
                 style={{

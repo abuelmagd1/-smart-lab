@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
+import EmptyState from '../components/EmptyState'
+import useDebounce from '../hooks/useDebounce'
 
 const statusStyle = {
   'تم التجميع': { bg: '#f3f4f6', color: '#374151' },
@@ -21,7 +23,6 @@ const periodFilters = [
   { key: 'older', label: 'قبل ذلك' },
 ]
 
-// بيحدد المريض ده وقع في أي فترة زمنية بناءً على تاريخ تسجيله
 const getBucket = (dateStr) => {
   const date = new Date(dateStr)
   const now = new Date()
@@ -37,7 +38,6 @@ const getBucket = (dateStr) => {
   return 'older'
 }
 
-// بيبحث في كل البيانات المرتبطة بالمريض: اسمه، تليفونه، دكتوره، سنه، نوعه، وأسماء/حالة تحاليله
 const matchesSearch = (p, term) => {
   if (!term) return true
   const t = term.trim().toLowerCase()
@@ -53,16 +53,37 @@ const matchesSearch = (p, term) => {
   )
 }
 
+function StatCardSkeleton() {
+  return (
+    <div className="bg-white rounded-xl p-4 animate-pulse" style={{ border: '1px solid var(--outline-variant)' }}>
+      <div style={{ width: '28px', height: '28px', background: '#f1f3f4', borderRadius: '8px', marginBottom: '10px' }} />
+      <div style={{ width: '48px', height: '24px', background: '#f1f3f4', borderRadius: '6px', marginBottom: '8px' }} />
+      <div style={{ width: '110px', height: '12px', background: '#f1f3f4', borderRadius: '6px' }} />
+    </div>
+  )
+}
+
+function TableRowSkeleton() {
+  return (
+    <tr style={{ borderTop: '1px solid var(--outline-variant)' }}>
+      <td className="p-3"><div className="animate-pulse" style={{ height: '14px', width: '110px', background: '#f1f3f4', borderRadius: '6px' }} /></td>
+      <td className="p-3"><div className="animate-pulse" style={{ height: '14px', width: '160px', background: '#f1f3f4', borderRadius: '6px' }} /></td>
+      <td className="p-3"><div className="animate-pulse" style={{ height: '20px', width: '80px', background: '#f1f3f4', borderRadius: '999px' }} /></td>
+    </tr>
+  )
+}
+
 export default function Dashboard() {
   const { settings } = useOutletContext()
   const [patients, setPatients] = useState([])
+  const [loading, setLoading] = useState(true)
   const [now, setNow] = useState(new Date())
   const [periodFilter, setPeriodFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 250)
 
   useEffect(() => {
     fetchData()
-    // تحديث الوقت كل دقيقة
     const timer = setInterval(() => setNow(new Date()), 60000)
     return () => clearInterval(timer)
   }, [])
@@ -74,6 +95,7 @@ export default function Dashboard() {
       .order('created_at', { ascending: false })
 
     setPatients(data || [])
+    setLoading(false)
   }
 
   const getFormattedDate = () => {
@@ -94,9 +116,8 @@ export default function Dashboard() {
 
   const filteredPatients = patients
     .filter(p => periodFilter === 'all' || getBucket(p.created_at) === periodFilter)
-    .filter(p => matchesSearch(p, search))
+    .filter(p => matchesSearch(p, debouncedSearch))
 
-  // الكروت الإحصائية فوق دايمًا بتعكس نتائج اليوم بس، مهما كان الفلتر المختار في الجدول تحت
   const todayPatients = patients.filter(p => getBucket(p.created_at) === 'today')
   const todayTests = todayPatients.flatMap(p => p.tests || [])
   const inProgressStages = ['تم التجميع', 'تم الاستلام', 'قيد التحليل']
@@ -122,13 +143,21 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {statCards.map((s, i) => (
-          <div key={i} className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
-            <div className="text-2xl mb-2">{s.icon}</div>
-            <div className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</div>
-            <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>{s.label}</div>
-          </div>
-        ))}
+        {loading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          statCards.map((s, i) => (
+            <div key={i} className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+              <div className="text-2xl mb-2">{s.icon}</div>
+              <div className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</div>
+              <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>{s.label}</div>
+            </div>
+          ))
+        )}
       </div>
 
       <div className="bg-white rounded-xl" style={{ border: '1px solid var(--outline-variant)' }}>
@@ -136,11 +165,10 @@ export default function Dashboard() {
           <div className="flex items-center justify-between flex-wrap gap-3">
             <h2 className="font-semibold" style={{ color: 'var(--on-surface)' }}>المرضى</h2>
             <span className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-              {filteredPatients.length} نتيجة
+              {loading ? '...' : `${filteredPatients.length} نتيجة`}
             </span>
           </div>
 
-          {/* فلتر الفترة الزمنية */}
           <div className="flex gap-2 flex-wrap">
             {periodFilters.map(f => (
               <button key={f.key} onClick={() => setPeriodFilter(f.key)}
@@ -154,7 +182,6 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* البحث الشامل */}
           <div className="relative">
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--on-surface-variant)' }}>🔍</span>
             <input type="text" placeholder="ابحث بالاسم، التليفون، الدكتور، اسم التحليل، الحالة..."
@@ -167,10 +194,28 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {filteredPatients.length === 0 ? (
-          <div className="text-center py-10 text-sm" style={{ color: 'var(--on-surface-variant)' }}>
-            لا يوجد مرضى مطابقين
-          </div>
+        {loading ? (
+          <table className="w-full">
+            <thead>
+              <tr style={{ background: '#f1f3f4' }}>
+                <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>اسم المريض</th>
+                <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>التحاليل</th>
+                <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>الحالة</th>
+              </tr>
+            </thead>
+            <tbody>
+              <TableRowSkeleton />
+              <TableRowSkeleton />
+              <TableRowSkeleton />
+              <TableRowSkeleton />
+            </tbody>
+          </table>
+        ) : filteredPatients.length === 0 ? (
+          <EmptyState
+            icon="👥"
+            title="لا يوجد مرضى مطابقين"
+            subtitle={search || periodFilter !== 'all' ? 'جرّب تغيّر كلمة البحث أو الفترة الزمنية' : 'لسه مفيش مرضى مسجلين، سجّل أول مريض من صفحة "مريض جديد"'}
+          />
         ) : (
           <table className="w-full">
             <thead>
@@ -200,3 +245,4 @@ export default function Dashboard() {
     </div>
   )
 }
+

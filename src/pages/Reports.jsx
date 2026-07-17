@@ -1,26 +1,28 @@
-import { useEffect, useState, useRef, Fragment } from 'react'
+﻿import { useEffect, useState, useRef, Fragment } from 'react'
 import { useLocation } from 'react-router-dom'
 import { supabase } from '../supabase'
 import JsBarcode from 'jsbarcode'
 import { getBarcodeCode } from '../components/BarcodeLabel'
+import LoadingSpinner from '../components/LoadingSpinner'
+import EmptyState from '../components/EmptyState'
 
 const resultColor = {
-  'طبيعي': { color: '#065f46', bg: '#d1fae5' },
-  'مرتفع': { color: '#92400e', bg: '#fef3c7' },
-  'منخفض': { color: '#1e40af', bg: '#dbeafe' },
-  'تم التجميع': { color: '#374151', bg: '#f3f4f6' },
-  'تم الاستلام': { color: '#1e40af', bg: '#dbeafe' },
-  'قيد التحليل': { color: '#92400e', bg: '#fef3c7' },
-  'معتمد': { color: '#065f46', bg: '#d1fae5' },
+  'Ø·Ø¨ÙŠØ¹ÙŠ': { color: '#065f46', bg: '#d1fae5' },
+  'Ù…Ø±ØªÙØ¹': { color: '#92400e', bg: '#fef3c7' },
+  'Ù…Ù†Ø®ÙØ¶': { color: '#1e40af', bg: '#dbeafe' },
+  'ØªÙ… Ø§Ù„ØªØ¬Ù…ÙŠØ¹': { color: '#374151', bg: '#f3f4f6' },
+  'ØªÙ… Ø§Ù„Ø§Ø³ØªÙ„Ø§Ù…': { color: '#1e40af', bg: '#dbeafe' },
+  'Ù‚ÙŠØ¯ Ø§Ù„ØªØ­Ù„ÙŠÙ„': { color: '#92400e', bg: '#fef3c7' },
+  'Ù…Ø¹ØªÙ…Ø¯': { color: '#065f46', bg: '#d1fae5' },
 }
 
 const periodFilters = [
-  { key: 'all', label: 'الكل' },
-  { key: 'today', label: 'اليوم' },
-  { key: 'yesterday', label: 'الامس' },
-  { key: 'week', label: 'آخر أسبوع' },
-  { key: 'month', label: 'آخر شهر' },
-  { key: 'older', label: 'قبل ذلك' },
+  { key: 'all', label: 'Ø§Ù„ÙƒÙ„' },
+  { key: 'today', label: 'Ø§Ù„ÙŠÙˆÙ…' },
+  { key: 'yesterday', label: 'Ø§Ù„Ø§Ù…Ø³' },
+  { key: 'week', label: 'Ø¢Ø®Ø± Ø£Ø³Ø¨ÙˆØ¹' },
+  { key: 'month', label: 'Ø¢Ø®Ø± Ø´Ù‡Ø±' },
+  { key: 'older', label: 'Ù‚Ø¨Ù„ Ø°Ù„Ùƒ' },
 ]
 
 const SECTION_LABELS = { RBC: 'RBC', Platelet: 'Platelet', WBC: 'WBC', WBC_DIFF: 'WBC - Diff' }
@@ -197,7 +199,7 @@ export default function Reports() {
     return groups
   }
 
-  // بيحسب التكلفة الإجمالية للتحاليل: كل تحليل مفرد بسعره + كل باقة بسعرها مرة واحدة (مش لكل بند جواها)
+  // Ø¨ÙŠØ­Ø³Ø¨ Ø§Ù„ØªÙƒÙ„ÙØ© Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠØ© Ù„Ù„ØªØ­Ø§Ù„ÙŠÙ„: ÙƒÙ„ ØªØ­Ù„ÙŠÙ„ Ù…ÙØ±Ø¯ Ø¨Ø³Ø¹Ø±Ù‡ + ÙƒÙ„ Ø¨Ø§Ù‚Ø© Ø¨Ø³Ø¹Ø±Ù‡Ø§ Ù…Ø±Ø© ÙˆØ§Ø­Ø¯Ø© (Ù…Ø´ Ù„ÙƒÙ„ Ø¨Ù†Ø¯ Ø¬ÙˆØ§Ù‡Ø§)
   const computeTotalCost = (patient) => {
     const { singleTests, panelGroups } = splitTests(patient)
     let total = 0
@@ -217,9 +219,9 @@ export default function Reports() {
     const nums = matches.map(parseFloat).sort((a, b) => a - b)
     const low = nums[0]
     const high = nums[1]
-    if (num > high) return 'مرتفع'
-    if (num < low) return 'منخفض'
-    return 'طبيعي'
+    if (num > high) return 'Ù…Ø±ØªÙØ¹'
+    if (num < low) return 'Ù…Ù†Ø®ÙØ¶'
+    return 'Ø·Ø¨ÙŠØ¹ÙŠ'
   }
 
   const buildPanelHtml = (group, colors, fontSize) => {
@@ -232,7 +234,7 @@ export default function Reports() {
 
     const bySection = {}
     group.items.forEach(item => {
-      const sec = item.section || 'أخرى'
+      const sec = item.section || 'Ø£Ø®Ø±Ù‰'
       if (!bySection[sec]) bySection[sec] = []
       bySection[sec].push(item)
     })
@@ -281,7 +283,7 @@ export default function Reports() {
           '</tr>'
       } else {
         header = '<tr style="background:' + tc + '12;">' +
-          '<td colspan="5" style="padding:4px 8px; font-weight:bold; font-size:' + fontSize + 'px; color:' + tc + ';">■ ' + (SECTION_LABELS[section] || section) + '</td>' +
+          '<td colspan="5" style="padding:4px 8px; font-weight:bold; font-size:' + fontSize + 'px; color:' + tc + ';">â–  ' + (SECTION_LABELS[section] || section) + '</td>' +
           '</tr>'
       }
 
@@ -371,18 +373,18 @@ export default function Reports() {
     const rLow = design.report_result_low_color
     const colors = { hc, tc, ttc, rNormal, rHigh, rLow }
 
-    const genderText = selectedPatient.gender === 'ذكر' ? 'Male' : 'Female'
+    const genderText = selectedPatient.gender === 'Ø°ÙƒØ±' ? 'Male' : 'Female'
     const printDate = new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const visitDate = new Date(selectedPatient.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const groups = groupedTests(selectedPatient)
     const splitResult = splitTests(selectedPatient)
     const singleTests = splitResult.singleTests
     const panelGroups = splitResult.panelGroups
-    const doctorName = settings?.doctor_name || 'اسم الطبيب'
+    const doctorName = settings?.doctor_name || 'Ø§Ø³Ù… Ø§Ù„Ø·Ø¨ÙŠØ¨'
 
     const tableRows = Object.entries(groups).map(([category, tests]) => `
       <tr style="background:${tc}18;">
-        <td colspan="4" style="padding:6px 10px; font-weight:bold; font-size:${fs + 1}px; color:${tc}; border-top:1px solid ${tc}40; border-bottom:1px solid ${tc}40;">■ ${category}</td>
+        <td colspan="4" style="padding:6px 10px; font-weight:bold; font-size:${fs + 1}px; color:${tc}; border-top:1px solid ${tc}40; border-bottom:1px solid ${tc}40;">â–  ${category}</td>
       </tr>
       ${tests.map((t, ti) => {
         const num = parseFloat(String(t.value || '').replace(',', '.'))
@@ -390,13 +392,13 @@ export default function Reports() {
         let status = t.status
         if (!isNaN(num) && matches && matches.length >= 2) {
           const sorted = matches.map(parseFloat).sort((a, b) => a - b)
-          status = num > sorted[1] ? 'مرتفع' : num < sorted[0] ? 'منخفض' : 'طبيعي'
+          status = num > sorted[1] ? 'Ù…Ø±ØªÙØ¹' : num < sorted[0] ? 'Ù…Ù†Ø®ÙØ¶' : 'Ø·Ø¨ÙŠØ¹ÙŠ'
         }
-        const color = status === 'مرتفع' ? rHigh : status === 'منخفض' ? rLow : rNormal
+        const color = status === 'Ù…Ø±ØªÙØ¹' ? rHigh : status === 'Ù…Ù†Ø®ÙØ¶' ? rLow : rNormal
         return `
           <tr style="background:${ti % 2 === 0 ? 'white' : '#fafafa'};">
-            <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">■ ${t.name}</td>
-            <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${color}; font-weight:${status === 'مرتفع' || status === 'منخفض' ? 'bold' : 'normal'};">${t.value || '---'}</td>
+            <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">â–  ${t.name}</td>
+            <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${color}; font-weight:${status === 'Ù…Ø±ØªÙØ¹' || status === 'Ù…Ù†Ø®ÙØ¶' ? 'bold' : 'normal'};">${t.value || '---'}</td>
             <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">${t.unit || ''}</td>
             <td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">${t.normal_range || '---'}</td>
           </tr>
@@ -466,7 +468,7 @@ export default function Reports() {
 
         <div style="margin-top:25px; display:flex; justify-content:space-between; align-items:flex-end; padding-top:12px; border-top:2px solid ${hc};">
           <div style="width:100px; height:65px; border:2px dashed ${hc}; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:${fs}px; color:${hc}; font-weight:bold; direction:rtl;">
-            ختم المعمل
+            Ø®ØªÙ… Ø§Ù„Ù…Ø¹Ù…Ù„
           </div>
           <div style="text-align:center;">
             <div style="font-size:${fs + 1}px; font-weight:bold; color:${hc}; margin-bottom:25px;">Dr. ${doctorName}</div>
@@ -494,7 +496,7 @@ export default function Reports() {
 
     const bySection = {}
     group.items.forEach(item => {
-      const sec = item.section || 'أخرى'
+      const sec = item.section || 'Ø£Ø®Ø±Ù‰'
       if (!bySection[sec]) bySection[sec] = []
       bySection[sec].push(item)
     })
@@ -525,7 +527,7 @@ export default function Reports() {
                           <td colSpan={2} style={{ padding: '4px 8px', fontWeight: 'bold', fontSize: `${fs - 1}px`, color: tc, textAlign: 'center' }}>Absolute</td>
                         </>
                       ) : (
-                        <td colSpan={5} style={{ padding: '4px 8px', fontWeight: 'bold', fontSize: `${fs}px`, color: tc }}>■ {SECTION_LABELS[section] || section}</td>
+                        <td colSpan={5} style={{ padding: '4px 8px', fontWeight: 'bold', fontSize: `${fs}px`, color: tc }}>â–  {SECTION_LABELS[section] || section}</td>
                       )}
                     </tr>
                     {items.map(item => isDiff ? (
@@ -603,7 +605,7 @@ export default function Reports() {
   const PreviewReport = ({ patient }) => {
     if (!patient || !settings) return null
 
-    const doctorName = settings.doctor_name || 'اسم الطبيب'
+    const doctorName = settings.doctor_name || 'Ø§Ø³Ù… Ø§Ù„Ø·Ø¨ÙŠØ¨'
     const printDate = new Date().toLocaleString('en-GB', {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit'
@@ -612,7 +614,7 @@ export default function Reports() {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit'
     })
-    const genderText = patient.gender === 'ذكر' ? 'Male' : patient.gender === 'أنثى' ? 'Female' : patient.gender || '-'
+    const genderText = patient.gender === 'Ø°ÙƒØ±' ? 'Male' : patient.gender === 'Ø£Ù†Ø«Ù‰' ? 'Female' : patient.gender || '-'
     const groups = groupedTests(patient)
     const splitResult = splitTests(patient)
     const singleTests = splitResult.singleTests
@@ -699,17 +701,17 @@ export default function Reports() {
                     <td colSpan={4} style={{
                       padding: '6px 10px', fontWeight: 'bold', fontSize: `${fs + 1}px`,
                       color: tc, borderTop: `1px solid ${tc}40`, borderBottom: `1px solid ${tc}40`
-                    }}>■ {category}</td>
+                    }}>â–  {category}</td>
                   </tr>
                   {tests.map((t, ti) => {
                     const computedStatus = calcResultStatus(t.value, t.normal_range) || t.status
                     return (
                       <tr key={ti} style={{ background: ti % 2 === 0 ? 'white' : '#fafafa' }}>
-                        <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>■ {t.name}</td>
+                        <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>â–  {t.name}</td>
                         <td style={{
                           padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee',
-                          color: computedStatus === 'مرتفع' ? rHigh : computedStatus === 'منخفض' ? rLow : rNormal,
-                          fontWeight: (computedStatus === 'مرتفع' || computedStatus === 'منخفض') ? 'bold' : 'normal'
+                          color: computedStatus === 'Ù…Ø±ØªÙØ¹' ? rHigh : computedStatus === 'Ù…Ù†Ø®ÙØ¶' ? rLow : rNormal,
+                          fontWeight: (computedStatus === 'Ù…Ø±ØªÙØ¹' || computedStatus === 'Ù…Ù†Ø®ÙØ¶') ? 'bold' : 'normal'
                         }}>{t.value || '---'}</td>
                         <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.unit || ''}</td>
                         <td style={{ padding: '6px 10px', fontSize: `${fs}px`, borderBottom: '1px solid #eee', color: ttc }}>{t.normal_range || '---'}</td>
@@ -724,7 +726,7 @@ export default function Reports() {
 
         <div style={{ marginTop: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingTop: '12px', borderTop: `2px solid ${hc}` }}>
           <div style={{ width: '100px', height: '65px', border: `2px dashed ${hc}`, borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: `${fs}px`, color: hc, fontWeight: 'bold', direction: 'rtl' }}>
-            ختم المعمل
+            Ø®ØªÙ… Ø§Ù„Ù…Ø¹Ù…Ù„
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: `${fs + 1}px`, fontWeight: 'bold', color: hc, marginBottom: '25px' }}>Dr. {doctorName}</div>
@@ -741,8 +743,8 @@ export default function Reports() {
       <iframe ref={printFrameRef} style={{ display: 'none' }} title="print-frame" />
 
       <div className="mb-6">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>التقارير</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>عرض وطباعة تقارير المرضى</p>
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>Ø§Ù„ØªÙ‚Ø§Ø±ÙŠØ±</h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>Ø¹Ø±Ø¶ ÙˆØ·Ø¨Ø§Ø¹Ø© ØªÙ‚Ø§Ø±ÙŠØ± Ø§Ù„Ù…Ø±Ø¶Ù‰</p>
       </div>
 
       {!selectedPatient ? (
@@ -759,11 +761,11 @@ export default function Reports() {
               </button>
             ))}
             <span className="text-xs self-center mr-1" style={{ color: 'var(--on-surface-variant)' }}>
-              {filtered.length} نتيجة
+              {filtered.length} Ù†ØªÙŠØ¬Ø©
             </span>
           </div>
 
-          <input type="text" placeholder="ابحث عن مريض..." value={search}
+          <input type="text" placeholder="Ø§Ø¨Ø­Ø« Ø¹Ù† Ù…Ø±ÙŠØ¶..." value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full px-4 py-2 rounded-lg outline-none text-right mb-4"
             style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
@@ -772,9 +774,9 @@ export default function Reports() {
           />
 
           {loading ? (
-            <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>جاري التحميل...</div>
+            <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>Ø¬Ø§Ø±ÙŠ Ø§Ù„ØªØ­Ù…ÙŠÙ„...</div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-10 text-sm" style={{ color: 'var(--on-surface-variant)' }}>لا يوجد مرضى مطابقين</div>
+            <div className="text-center py-10 text-sm" style={{ color: 'var(--on-surface-variant)' }}>Ù„Ø§ ÙŠÙˆØ¬Ø¯ Ù…Ø±Ø¶Ù‰ Ù…Ø·Ø§Ø¨Ù‚ÙŠÙ†</div>
           ) : (
             <div className="space-y-4">
               {filtered.map(patient => (
@@ -783,21 +785,21 @@ export default function Reports() {
                     <div>
                       <h2 className="font-semibold" style={{ color: 'var(--on-surface)' }}>{patient.name}</h2>
                       <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
-                        {patient.age} سنة • {patient.gender} • {patient.doctor}
+                        {patient.age} Ø³Ù†Ø© â€¢ {patient.gender} â€¢ {patient.doctor}
                       </p>
                     </div>
                     <button onClick={() => setSelectedPatient(patient)}
                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
                       style={{ background: 'var(--primary-container)' }}>
-                      👁️ عرض التقرير
+                      ðŸ‘ï¸ Ø¹Ø±Ø¶ Ø§Ù„ØªÙ‚Ø±ÙŠØ±
                     </button>
                   </div>
                   <table className="w-full">
                     <thead>
                       <tr style={{ background: '#f1f3f4' }}>
-                        <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>التحليل</th>
-                        <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>النتيجة</th>
-                        <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>الحالة</th>
+                        <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>Ø§Ù„ØªØ­Ù„ÙŠÙ„</th>
+                        <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>Ø§Ù„Ù†ØªÙŠØ¬Ø©</th>
+                        <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>Ø§Ù„Ø­Ø§Ù„Ø©</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -824,17 +826,17 @@ export default function Reports() {
         <div className="flex gap-4" style={{ alignItems: 'flex-start' }}>
 
           <div className="bg-white rounded-xl p-4 flex-shrink-0" style={{ width: '220px', border: '1px solid var(--outline-variant)', position: 'sticky', top: '20px' }}>
-            <h3 className="font-semibold text-sm mb-4" style={{ color: 'var(--on-surface)' }}>🎨 تصميم التقرير</h3>
+            <h3 className="font-semibold text-sm mb-4" style={{ color: 'var(--on-surface)' }}>ðŸŽ¨ ØªØµÙ…ÙŠÙ… Ø§Ù„ØªÙ‚Ø±ÙŠØ±</h3>
 
             <div className="space-y-3">
               {[
-                { label: 'لون الهيدر', key: 'report_header_color' },
-                { label: 'لون الجدول', key: 'report_table_color' },
-                { label: 'لون نص الجدول', key: 'report_table_text_color' },
-                { label: 'لون النتيجة الطبيعية', key: 'report_result_normal_color' },
-                { label: 'لون النتيجة المرتفعة', key: 'report_result_high_color' },
-                { label: 'لون النتيجة المنخفضة', key: 'report_result_low_color' },
-                { label: 'لون الباركود والـ ID', key: 'report_barcode_color' },
+                { label: 'Ù„ÙˆÙ† Ø§Ù„Ù‡ÙŠØ¯Ø±', key: 'report_header_color' },
+                { label: 'Ù„ÙˆÙ† Ø§Ù„Ø¬Ø¯ÙˆÙ„', key: 'report_table_color' },
+                { label: 'Ù„ÙˆÙ† Ù†Øµ Ø§Ù„Ø¬Ø¯ÙˆÙ„', key: 'report_table_text_color' },
+                { label: 'Ù„ÙˆÙ† Ø§Ù„Ù†ØªÙŠØ¬Ø© Ø§Ù„Ø·Ø¨ÙŠØ¹ÙŠØ©', key: 'report_result_normal_color' },
+                { label: 'Ù„ÙˆÙ† Ø§Ù„Ù†ØªÙŠØ¬Ø© Ø§Ù„Ù…Ø±ØªÙØ¹Ø©', key: 'report_result_high_color' },
+                { label: 'Ù„ÙˆÙ† Ø§Ù„Ù†ØªÙŠØ¬Ø© Ø§Ù„Ù…Ù†Ø®ÙØ¶Ø©', key: 'report_result_low_color' },
+                { label: 'Ù„ÙˆÙ† Ø§Ù„Ø¨Ø§Ø±ÙƒÙˆØ¯ ÙˆØ§Ù„Ù€ ID', key: 'report_barcode_color' },
               ].map(item => (
                 <div key={item.key} className="flex items-center justify-between gap-2">
                   <label className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>{item.label}</label>
@@ -846,7 +848,7 @@ export default function Reports() {
               ))}
 
               <div>
-                <label className="text-xs block mb-1" style={{ color: 'var(--on-surface-variant)' }}>حجم الخط: {design.report_font_size}px</label>
+                <label className="text-xs block mb-1" style={{ color: 'var(--on-surface-variant)' }}>Ø­Ø¬Ù… Ø§Ù„Ø®Ø·: {design.report_font_size}px</label>
                 <input type="range" min="9" max="14" value={design.report_font_size}
                   onChange={e => setDesign(prev => ({ ...prev, report_font_size: e.target.value }))}
                   className="w-full"
@@ -857,33 +859,33 @@ export default function Reports() {
             <button onClick={saveDesign} disabled={savingDesign}
               className="w-full py-2 rounded-lg text-xs font-medium text-white mt-4"
               style={{ background: designSaved ? '#10b981' : 'var(--primary-container)', opacity: savingDesign ? 0.7 : 1 }}>
-              {designSaved ? '✅ تم الحفظ' : savingDesign ? 'جاري...' : '💾 حفظ التصميم'}
+              {designSaved ? 'âœ… ØªÙ… Ø§Ù„Ø­ÙØ¸' : savingDesign ? 'Ø¬Ø§Ø±ÙŠ...' : 'ðŸ’¾ Ø­ÙØ¸ Ø§Ù„ØªØµÙ…ÙŠÙ…'}
             </button>
 
             <button onClick={printReport}
               className="w-full py-2 rounded-lg text-xs font-medium text-white mt-2"
               style={{ background: '#1a2456' }}>
-              🖨️ طباعة التقرير
+              ðŸ–¨ï¸ Ø·Ø¨Ø§Ø¹Ø© Ø§Ù„ØªÙ‚Ø±ÙŠØ±
             </button>
 
             <button onClick={() => setSelectedPatient(null)}
               className="w-full py-2 rounded-lg text-xs font-medium mt-2"
               style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
-              ← رجوع
+              â† Ø±Ø¬ÙˆØ¹
             </button>
           </div>
 
-          {/* صندوق التكلفة - للدكتور فقط، لا يظهر في الطباعة أبدًا */}
+          {/* ØµÙ†Ø¯ÙˆÙ‚ Ø§Ù„ØªÙƒÙ„ÙØ© - Ù„Ù„Ø¯ÙƒØªÙˆØ± ÙÙ‚Ø·ØŒ Ù„Ø§ ÙŠØ¸Ù‡Ø± ÙÙŠ Ø§Ù„Ø·Ø¨Ø§Ø¹Ø© Ø£Ø¨Ø¯Ù‹Ø§ */}
           <div className="bg-white rounded-xl p-4 flex-shrink-0" style={{ width: '200px', border: '1px solid var(--outline-variant)', position: 'sticky', top: '20px' }}>
-            <h3 className="font-semibold text-sm mb-3" style={{ color: 'var(--on-surface)' }}>💰 التكلفة الإجمالية</h3>
+            <h3 className="font-semibold text-sm mb-3" style={{ color: 'var(--on-surface)' }}>ðŸ’° Ø§Ù„ØªÙƒÙ„ÙØ© Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠØ©</h3>
             <div className="text-center py-3 rounded-lg" style={{ background: '#f0fdf4' }}>
               <span className="text-2xl font-bold" style={{ color: '#065f46' }}>
                 {computeTotalCost(selectedPatient).toLocaleString('ar-EG')}
               </span>
-              <span className="text-sm mr-1" style={{ color: '#065f46' }}>جنيه</span>
+              <span className="text-sm mr-1" style={{ color: '#065f46' }}>Ø¬Ù†ÙŠÙ‡</span>
             </div>
             <p className="text-xs mt-2" style={{ color: 'var(--on-surface-variant)' }}>
-              هذا المبلغ للاستخدام الداخلي فقط ولا يظهر عند طباعة التقرير.
+              Ù‡Ø°Ø§ Ø§Ù„Ù…Ø¨Ù„Øº Ù„Ù„Ø§Ø³ØªØ®Ø¯Ø§Ù… Ø§Ù„Ø¯Ø§Ø®Ù„ÙŠ ÙÙ‚Ø· ÙˆÙ„Ø§ ÙŠØ¸Ù‡Ø± Ø¹Ù†Ø¯ Ø·Ø¨Ø§Ø¹Ø© Ø§Ù„ØªÙ‚Ø±ÙŠØ±.
             </p>
           </div>
 
