@@ -132,7 +132,8 @@ export default function Reports() {
 
   const fetchSettings = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    const { data } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).single()
+    if (!user) return
+    const { data } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).maybeSingle()
     if (data) {
       setSettings(data)
       setDesign({
@@ -175,7 +176,8 @@ export default function Reports() {
   const saveDesign = async () => {
     setSavingDesign(true)
     const { data: { user } } = await supabase.auth.getUser()
-    await supabase.from('lab_settings').update(design).eq('user_id', user.id)
+    if (!user) { setSavingDesign(false); return }
+    await supabase.from('lab_settings').upsert({ user_id: user.id, ...design }, { onConflict: 'user_id' })
     setSettings(prev => ({ ...prev, ...design }))
     setSavingDesign(false)
     setDesignSaved(true)
@@ -774,9 +776,13 @@ export default function Reports() {
           />
 
           {loading ? (
-            <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>جاري التحميل...</div>
+            <LoadingSpinner label="جاري تحميل قائمة المرضى..." fullHeight />
           ) : filtered.length === 0 ? (
-            <div className="text-center py-10 text-sm" style={{ color: 'var(--on-surface-variant)' }}>لا يوجد مرضى مطابقين</div>
+            <EmptyState
+              icon="🔍"
+              title="لا يوجد مرضى مطابقين"
+              subtitle={search ? 'جرّب كلمة بحث مختلفة أو غيّر فلتر الفترة الزمنية' : 'لسه مفيش مرضى مسجلين في الفترة دي'}
+            />
           ) : (
             <div className="space-y-4">
               {filtered.map(patient => (

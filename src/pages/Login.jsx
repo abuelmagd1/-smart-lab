@@ -1,6 +1,24 @@
 import { useState } from 'react'
 import { supabase } from '../supabase'
 import { useNavigate } from 'react-router-dom'
+
+const mapAuthError = (error) => {
+  const msg = (error?.message || '').toLowerCase()
+  if (msg.includes('invalid login credentials') || msg.includes('invalid_credentials')) {
+    return 'البريد الإلكتروني أو كلمة المرور غلط'
+  }
+  if (msg.includes('email not confirmed')) {
+    return 'الحساب ده لسه محتاج تأكيد البريد الإلكتروني'
+  }
+  if (msg.includes('too many requests') || error?.status === 429) {
+    return 'محاولات كتير في وقت قصير، استنى شوية وحاول تاني'
+  }
+  if (msg.includes('failed to fetch') || msg.includes('network')) {
+    return 'مفيش اتصال بالإنترنت دلوقتي، تأكد من الشبكة وحاول تاني'
+  }
+  return 'حصل خطأ أثناء تسجيل الدخول، حاول تاني'
+}
+
 export default function Login() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -14,14 +32,21 @@ export default function Login() {
     setLoading(true)
     setError('')
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
 
-    if (error) {
-      console.error('Supabase login error:', error)
-      setError(`خطأ: ${error.message} (status: ${error.status})`)
-      setLoading(false)
-    } else {
+      if (error) {
+        console.error('Supabase login error:', error)
+        setError(mapAuthError(error))
+        return
+      }
+
       navigate('/dashboard')
+    } catch (err) {
+      console.error('Unexpected login error:', err)
+      setError(mapAuthError(err))
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -237,5 +262,3 @@ export default function Login() {
     </div>
   )
 }
-
-

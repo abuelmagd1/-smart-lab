@@ -1,6 +1,7 @@
 import { Outlet, NavLink } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabase'
+import ErrorBoundary from '../components/ErrorBoundary'
 
 const navItems = [
   { label: 'لوحة التحكم', icon: '📊', path: '/dashboard' },
@@ -8,7 +9,6 @@ const navItems = [
   { label: 'نتائج التحاليل', icon: '🔬', path: '/results' },
   { label: 'المساعد الذكي', icon: '🤖', path: '/ai-assistant' },
   { label: 'التقارير', icon: '📄', path: '/reports' },
-  { label: 'الإحصائيات', icon: '📈', path: '/statistics' },
 ]
 
 export default function Layout() {
@@ -31,6 +31,8 @@ export default function Layout() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [msg, setMsg] = useState({ text: '', type: '' })
 
+  // شات "لابو" محفوظ هنا طول ما الـ Layout مش بيعمل remount
+  // (يعني طول ما إنت جوه السيستم ومنقلتش بين الصفحات بـ refresh كامل)
   const [chatMessages, setChatMessages] = useState([
     { role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي تعمله وأنا هعمله فوراً!' }
   ])
@@ -49,6 +51,7 @@ export default function Layout() {
     getUser()
   }, [])
 
+  // تطبيق حجم الخط فور تحميل الصفحة
   useEffect(() => {
     const sizeMap = { small: '13px', medium: '15px', large: '17px' }
     document.body.style.fontSize = sizeMap[settings.fontSize]
@@ -83,6 +86,7 @@ export default function Layout() {
       setLabName(data.lab_name || 'نظام إدارة المعامل الطبية')
     }
 
+    // قراءة آخر وقت فتح فيه هذا الحساب الإشعارات (محفوظ لكل حساب لوحده)
     const savedSeenAt = localStorage.getItem(`notif_last_seen_${user.id}`)
     setLastSeenAt(savedSeenAt)
 
@@ -90,6 +94,7 @@ export default function Layout() {
   }
 
   const fetchAdminNotifications = async (userId) => {
+    // مسح الإشعارات اللي عدى عليها أسبوع كامل
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
     await supabase.from('admin_notifications').delete().lt('created_at', weekAgo)
 
@@ -102,6 +107,7 @@ export default function Layout() {
     setAdminNotifications(data || [])
   }
 
+  // فتح/قفل قائمة الإشعارات، ولما تفتح بنسجل إن المستخدم شافها لحد دلوقتي
   const toggleNotifications = () => {
     const opening = !showNotifications
     setShowNotifications(opening)
@@ -184,6 +190,7 @@ export default function Layout() {
     setTimeout(() => setMsg({ text: '', type: '' }), 2000)
   }
 
+  // عداد "الجديد" بيحسب بس الإشعارات اللي وصلت بعد آخر مرة فتح فيها المستخدم القائمة
   const totalBadge = adminNotifications.filter(n =>
     !lastSeenAt || new Date(n.created_at) > new Date(lastSeenAt)
   ).length
@@ -459,7 +466,9 @@ export default function Layout() {
           </div>
         )}
 
-        <Outlet context={{ settings, chatMessages, setChatMessages, chatHistoryRef }} />
+        <ErrorBoundary key={typeof window !== 'undefined' ? window.location.pathname : 'route'}>
+          <Outlet context={{ settings, chatMessages, setChatMessages, chatHistoryRef }} />
+        </ErrorBoundary>
       </main>
     </div>
   )

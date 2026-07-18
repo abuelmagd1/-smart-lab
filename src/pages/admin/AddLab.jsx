@@ -71,69 +71,79 @@ export default function AddLab() {
 
     setLoading(true)
 
-    // 1. حفظ جلسة الأدمن الحالية
+    // بنحفظ جلسة الأدمن الحالية عشان نضمن نرجّعها في الآخر، مهما حصل أي خطأ في النص.
+    // لازم يبقى المتغير ده متاح جوه finally، فهو معرّف هنا برّه الـ try.
     const { data: { session: adminSession } } = await supabase.auth.getSession()
 
-    // 2. إنشاء حساب الدكتور الجديد
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-    })
-
-    if (signUpError) {
-      setError('حدث خطأ: ' + signUpError.message)
-      setLoading(false)
-      return
-    }
-
-    const newUserId = signUpData.user.id
-
-    // 3. رفع اللوجو لو موجود (بعد الضغط)
-    let logoUrl = null
-    if (logoFile) {
-      const fileName = `${newUserId}.jpg`
-      const { error: uploadError } = await supabase.storage
-        .from('logos')
-        .upload(fileName, logoFile, { upsert: true, contentType: 'image/jpeg' })
-
-      if (!uploadError) {
-        const { data: urlData } = supabase.storage.from('logos').getPublicUrl(fileName)
-        logoUrl = urlData.publicUrl
-      }
-    }
-
-    // 4. إضافة الدور (دكتور) في profiles
-    await supabase.from('profiles').insert([{
-      id: newUserId,
-      email: form.email,
-      role: 'doctor',
-    }])
-
-    // 5. إضافة بيانات المعمل في lab_settings
-    await supabase.from('lab_settings').insert([{
-      user_id: newUserId,
-      owner_name: form.ownerName,
-      doctor_name: form.doctorName,
-      lab_name: form.labName,
-      address: form.address,
-      phone: form.phone,
-      email: form.email,
-      qualification: form.qualification,
-      logo_url: logoUrl,
-    }])
-
-    // 6. استرجاع جلسة الأدمن
-    if (adminSession) {
-      await supabase.auth.setSession({
-        access_token: adminSession.access_token,
-        refresh_token: adminSession.refresh_token,
+    try {
+      // 1. إنشاء حساب الدكتور الجديد (ده بيسجّل دخول تلقائيًا بحساب الدكتور في المتصفح الحالي مؤقتًا)
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
       })
-    }
 
-    setLoading(false)
-    setSuccess(true)
-    resetForm()
-    setTimeout(() => setSuccess(false), 4000)
+      if (signUpError) {
+        throw new Error(signUpError.message)
+      }
+
+      const newUserId = signUpData.user.id
+
+      // 2. رفع اللوجو لو موجود (بعد الضغط) - فشل ده مش مصيري، بنكمل من غيره لو حصل
+      let logoUrl = null
+      if (logoFile) {
+        const fileName = `${newUserId}.jpg`
+        const { error: uploadError } = await supabase.storage
+          .from('logos')
+          .upload(fileName, logoFile, { upsert: true, contentType: 'image/jpeg' })
+
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from('logos').getPublicUrl(fileName)
+          logoUrl = urlData.publicUrl
+        }
+      }
+
+      // 3. إضافة الدور (دكتور) في profiles - لازم نتأكد إنها نجحت فعلًا
+      const { error: profileError } = await supabase.from('profiles').insert([{
+        id: newUserId,
+        email: form.email,
+        role: 'doctor',
+      }])
+      if (profileError) {
+        throw new Error('اتعمل الحساب لكن فشل تحديد صلاحيته: ' + profileError.message)
+      }
+
+      // 4. إضافة بيانات المعمل في lab_settings - لازم نتأكد إنها نجحت فعلًا
+      const { error: settingsError } = await supabase.from('lab_settings').insert([{
+        user_id: newUserId,
+        owner_name: form.ownerName,
+        doctor_name: form.doctorName,
+        lab_name: form.labName,
+        address: form.address,
+        phone: form.phone,
+        email: form.email,
+        qualification: form.qualification,
+        logo_url: logoUrl,
+      }])
+      if (settingsError) {
+        throw new Error('اتعمل الحساب لكن فشل حفظ بيانات المعمل: ' + settingsError.message)
+      }
+
+      setSuccess(true)
+      resetForm()
+      setTimeout(() => setSuccess(false), 4000)
+    } catch (err) {
+      setError('حدث خطأ: ' + err.message)
+    } finally {
+      // مهما حصل فوق (نجاح أو فشل في أي خطوة)، لازم نرجّع جلسة الأدمن قبل ما نسيب الصفحة،
+      // عشان الأدمن ميفضلش عالق داخل بحساب الدكتور الجديد.
+      if (adminSession) {
+        await supabase.auth.setSession({
+          access_token: adminSession.access_token,
+          refresh_token: adminSession.refresh_token,
+        })
+      }
+      setLoading(false)
+    }
   }
 
   return (
