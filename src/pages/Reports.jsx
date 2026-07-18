@@ -791,7 +791,7 @@ export default function Reports() {
                     <button onClick={() => setSelectedPatient(patient)}
                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
                       style={{ background: 'var(--primary-container)' }}>
-                      ðŸ‘ï¸ عرض التقرير
+                      👁️ عرض التقرير
                     </button>
                   </div>
                   <table className="w-full">
