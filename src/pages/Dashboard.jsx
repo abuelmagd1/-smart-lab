@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
 import EmptyState from '../components/EmptyState'
 import useDebounce from '../hooks/useDebounce'
+import { useToast } from '../components/Toast'
 
 const statusStyle = {
   'تم التجميع': { bg: '#f3f4f6', color: '#374151' },
@@ -75,8 +76,10 @@ function TableRowSkeleton() {
 
 export default function Dashboard() {
   const { settings } = useOutletContext()
+  const showToast = useToast()
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [now, setNow] = useState(new Date())
   const [periodFilter, setPeriodFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -89,10 +92,19 @@ export default function Dashboard() {
   }, [])
 
   const fetchData = async () => {
-    const { data } = await supabase
+    setLoadError(false)
+    const { data, error } = await supabase
       .from('patients')
       .select('*, tests(*)')
       .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('فشل جلب بيانات المرضى:', error)
+      setLoadError(true)
+      showToast('حصل خطأ أثناء تحميل بيانات المرضى، جرّب تحدّث الصفحة', 'error')
+      setLoading(false)
+      return
+    }
 
     setPatients(data || [])
     setLoading(false)
@@ -151,7 +163,7 @@ export default function Dashboard() {
           </>
         ) : (
           statCards.map((s, i) => (
-            <div key={i} className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+            <div key={i} className="bg-white rounded-xl p-4" style={{ border:'1px solid var(--outline-variant)' }}>
               <div className="text-2xl mb-2">{s.icon}</div>
               <div className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</div>
               <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>{s.label}</div>
@@ -163,7 +175,7 @@ export default function Dashboard() {
       <div className="bg-white rounded-xl" style={{ border: '1px solid var(--outline-variant)' }}>
         <div className="p-4 space-y-3" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <h2 className="font-semibold" style={{ color: 'var(--on-surface)' }}>المرضى</h2>
+            <h2 className="font-semibold" style={{ color: 'var(--on-surface)'}}>المرضى</h2>
             <span className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
               {loading ? '...' : `${filteredPatients.length} نتيجة`}
             </span>
@@ -198,9 +210,9 @@ export default function Dashboard() {
           <table className="w-full">
             <thead>
               <tr style={{ background: '#f1f3f4' }}>
-                <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>اسم المريض</th>
-                <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>التحاليل</th>
-                <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>الحالة</th>
+                <th className="text-right p-3 text-xs font-semibold" style={{color: 'var(--on-surface-variant)' }}>اسم المريض</th>
+                <th className="text-right p-3 text-xs font-semibold" style={{color: 'var(--on-surface-variant)' }}>التحاليل</th>
+                <th className="text-right p-3 text-xs font-semibold" style={{color: 'var(--on-surface-variant)' }}>الحالة</th>
               </tr>
             </thead>
             <tbody>
@@ -210,19 +222,25 @@ export default function Dashboard() {
               <TableRowSkeleton />
             </tbody>
           </table>
+        ) : loadError ? (
+          <EmptyState
+            icon="⚠️"
+            title="مقدرناش نجيب بيانات المرضى"
+            subtitle="حصل خطأ أثناء الاتصال بالسيرفر. جرّب تحدّث الصفحة، ولو المشكلة استمرت كلّم الدعم الفني."
+          />
         ) : filteredPatients.length === 0 ? (
           <EmptyState
             icon="👥"
             title="لا يوجد مرضى مطابقين"
-            subtitle={search || periodFilter !== 'all' ? 'جرّب تغيّر كلمة البحث أو الفترة الزمنية' : 'لسه مفيش مرضى مسجلين، سجّل أول مريض من صفحة "مريض جديد"'}
+            subtitle={search || periodFilter !== 'all' ? 'جرّب تغيّر كلمة البحثأو الفترة الزمنية' : 'لسه مفيش مرضى مسجلين، سجّل أول مريض من صفحة "مريض جديد"'}
           />
         ) : (
           <table className="w-full">
             <thead>
               <tr style={{ background: '#f1f3f4' }}>
-                <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>اسم المريض</th>
-                <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>التحاليل</th>
-                <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>الحالة</th>
+                <th className="text-right p-3 text-xs font-semibold" style={{color: 'var(--on-surface-variant)' }}>اسم المريض</th>
+                <th className="text-right p-3 text-xs font-semibold" style={{color: 'var(--on-surface-variant)' }}>التحاليل</th>
+                <th className="text-right p-3 text-xs font-semibold" style={{color: 'var(--on-surface-variant)' }}>الحالة</th>
               </tr>
             </thead>
             <tbody>
@@ -232,7 +250,7 @@ export default function Dashboard() {
                   <td className="p-3 text-sm" style={{ color: 'var(--on-surface-variant)' }}>{p.tests?.map(t => t.name).join(', ')}</td>
                   <td className="p-3">
                     <span className="text-xs font-medium px-2 py-1 rounded-full"
-                      style={{ background: statusStyle[p.tests?.[0]?.status]?.bg || '#fef3c7', color: statusStyle[p.tests?.[0]?.status]?.color || '#92400e' }}>
+                      style={{ background: statusStyle[p.tests?.[0]?.status]?.bg || '#fef3c7', color: statusStyle[p.tests?.[0]?.status]?.color || '#92400e'}}>
                       {p.tests?.[0]?.status || 'تم التجميع'}
                     </span>
                   </td>
@@ -245,4 +263,3 @@ export default function Dashboard() {
     </div>
   )
 }
-

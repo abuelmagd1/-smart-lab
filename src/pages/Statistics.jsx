@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
+import { useToast } from '../components/Toast'
 
 // نفس منطق فصل التحاليل المفردة عن الباقات المستخدم في صفحة التقارير
 const splitTests = (patient) => {
@@ -22,7 +23,7 @@ const splitTests = (patient) => {
 
 const periodOptions = [
   { key: 'today', label: 'اليوم', icon: '📅' },
-  { key: 'week', label: 'آخر 7 أيام', icon: '🗓️' },
+  { key: 'week', label: 'آخر 7 أيام', icon: '🗓ï¸' },
   { key: 'month', label: 'الشهر الحالي', icon: '📆' },
   { key: 'custom', label: 'فترة مخصصة', icon: '🎯' },
 ]
@@ -122,18 +123,20 @@ const DeltaBadge = ({ value }) => {
   const up = value > 0
   return (
     <span className="text-xs font-medium px-2 py-0.5 rounded-full"
-      style={{ background: up ? '#d1fae5' : '#fee2e2', color: up ? '#065f46' : '#dc2626' }}>
+      style={{ background: up ? '#d1fae5' : '#fee2e2', color: up ? '#065f46' :'#dc2626' }}>
       {up ? '▲' : '▼'} {Math.abs(value)}%
     </span>
   )
 }
 
 export default function Statistics() {
+  const showToast = useToast()
   const [periodType, setPeriodType] = useState('month')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [allPatients, setAllPatients] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [showAllRanked, setShowAllRanked] = useState(false)
   const [patientSearch, setPatientSearch] = useState('')
 
@@ -141,10 +144,20 @@ export default function Statistics() {
 
   const fetchAll = async () => {
     setLoading(true)
-    const { data } = await supabase
+    setLoadError(false)
+    const { data, error } = await supabase
       .from('patients')
       .select('*, tests(*)')
       .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('فشل جلب بيانات الإحصائيات:', error)
+      setLoadError(true)
+      showToast('حصل خطأ أثناء تحميل بيانات الإحصائيات، جرّب تحدّث الصفحة', 'error')
+      setLoading(false)
+      return
+    }
+
     setAllPatients(data || [])
     setLoading(false)
   }
@@ -157,7 +170,7 @@ export default function Statistics() {
     return d >= s && d < e
   }
 
-  const currentPatients = allPatients.filter(p => inRange(p.created_at, start, end))
+  const currentPatients = allPatients.filter(p => inRange(p.created_at, start,end))
   const previousPatients = allPatients.filter(p => inRange(p.created_at, prevStart, prevEnd))
 
   const stats = computeStats(currentPatients)
@@ -171,7 +184,7 @@ export default function Statistics() {
   const filteredPatients = currentPatients.filter(p => p.name?.includes(patientSearch))
 
   const cards = [
-    { label: 'عدد المرضى', value: stats.totalPatients.toLocaleString('ar-EG'), delta: pctChange(stats.totalPatients, prevStats.totalPatients), icon: '👥', color: '#1a2456' },
+    { label: 'عدد المرضى', value: stats.totalPatients.toLocaleString('ar-EG'), delta: pctChange(stats.totalPatients, prevStats.totalPatients), icon:'👥', color: '#1a2456' },
     { label: 'عدد الطلبات (تحاليل + باقات)', value: stats.totalOrders.toLocaleString('ar-EG'), delta: pctChange(stats.totalOrders, prevStats.totalOrders), icon: '🧪', color: '#0e7490' },
     { label: 'الإيراد الإجمالي', value: stats.totalRevenue.toLocaleString('ar-EG') + ' جنيه', delta: pctChange(stats.totalRevenue, prevStats.totalRevenue), icon: '💰', color: '#065f46' },
     { label: 'متوسط الإيراد لكل مريض', value: avgPerPatient.toLocaleString('ar-EG', { maximumFractionDigits: 0 }) + ' جنيه', delta: null, icon: '📊', color: '#92400e' },
@@ -226,6 +239,11 @@ export default function Statistics() {
 
       {loading ? (
         <div className="text-center py-16" style={{ color: 'var(--on-surface-variant)' }}>جاري تحميل الإحصائيات...</div>
+      ) : loadError ? (
+        <div className="text-center py-16" style={{ color: 'var(--on-surface-variant)' }}>
+          <div className="text-3xl mb-2">⚠️</div>
+          مقدرناش نجيب بيانات الإحصائيات. جرّب تحدّث الصفحة.
+        </div>
       ) : (
         <>
           {/* بطاقات الملخص */}
@@ -263,7 +281,7 @@ export default function Statistics() {
                           <span className="text-sm font-medium" style={{ color: 'var(--on-surface)' }}>{item.name}</span>
                           <span className="text-xs px-1.5 py-0.5 rounded-full font-medium"
                             style={{
-                              background: item.type === 'باقة' ? '#e0f2fe' : '#f1f3f4',
+                              background: item.type === 'باقة' ? '#e0f2fe': '#f1f3f4',
                               color: item.type === 'باقة' ? '#0369a1' : 'var(--on-surface-variant)'
                             }}>
                             {item.type}
@@ -332,7 +350,7 @@ export default function Statistics() {
               <input type="text" placeholder="ابحث باسم المريض..." value={patientSearch}
                 onChange={e => setPatientSearch(e.target.value)}
                 className="px-3 py-2 rounded-lg outline-none text-sm text-right"
-                style={{ border: '1px solid var(--outline-variant)', minWidth: '220px' }} />
+                style={{ border: '1px solid var(--outline-variant)', minWidth:'220px' }} />
             </div>
 
             {filteredPatients.length === 0 ? (
