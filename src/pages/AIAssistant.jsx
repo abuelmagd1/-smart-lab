@@ -19,7 +19,7 @@ const renderMarkdown = (text) => {
     .replace(/# (.+)/g, '<h1 style="font-size:16px;font-weight:bold;margin:10px 0 4px;color:var(--on-surface)">$1</h1>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/^[-â€“â€¢]\s+(.+)/gm, '<div style="display:flex;gap:6px;margin:3px 0"><span style="color:var(--primary-container)">â€¢</span><span>$1</span></div>')
+    .replace(/^[-–•]\s+(.+)/gm, '<div style="display:flex;gap:6px;margin:3px 0"><span style="color:var(--primary-container)">•</span><span>$1</span></div>')
     .replace(/---+/g, '<hr style="border:none;border-top:1px solid var(--outline-variant);margin:8px 0"/>')
     .replace(/\n{2,}/g, '<br/><br/>')
     .replace(/\n/g, '<br/>')
@@ -28,12 +28,12 @@ const renderMarkdown = (text) => {
 const formatClock = (ts) => ts ? new Date(ts).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : ''
 const formatTimer = (s) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
 
-const SUGGESTIONS = ['Ø³Ø¬Ù‘Ù„ Ù…Ø±ÙŠØ¶ Ø¬Ø¯ÙŠØ¯', 'Ø¥ÙŠÙ‡ Ø£Ø³Ø¨Ø§Ø¨ Ø§Ø±ØªÙØ§Ø¹ Ø§Ù„Ø³ÙƒØ±ØŸ', 'Ø§Ø¹Ø±Ø¶ Ø­Ø§Ù„Ø© Ù…Ø±ÙŠØ¶ Ù…Ø¹ÙŠÙ†', 'Ø§ÙØªØ­ ØªÙ‚Ø±ÙŠØ± Ù…Ø±ÙŠØ¶ Ù„Ù„Ø·Ø¨Ø§Ø¹Ø©']
+const SUGGESTIONS = ['سجّل مريض جديد', 'إيه أسباب ارتفاع السكر؟', 'اعرض حالة مريض معين', 'افتح تقرير مريض للطباعة']
 
 const MAX_RECORDING_MS = 120000
 const MAX_IMAGES = 4
 const MAX_IMAGE_MB = 8
-const AUTO_RESET_AFTER_TURNS = 8 // Ø¨Ø¹Ø¯ ÙƒÙ„ 8 Ø±Ø¯ÙˆØ¯ØŒ Ù†Ø¨Ø¯Ø£ Ø³ÙŠØ§Ù‚ Ø¬Ø¯ÙŠØ¯ Ù…Ø¹ Gemini Ø¹Ø´Ø§Ù† Ø§Ù„Ø±Ø¯ ÙŠÙØ¶Ù„ Ø³Ø±ÙŠØ¹
+const AUTO_RESET_AFTER_TURNS = 8 // بعد كل 8 ردود، نبدأ سياق جديد مع Gemini عشان الرد يفضل سريع
 
 const fetchWithTimeout = async (url, options, timeoutMs) => {
   options = options || {}
@@ -52,7 +52,7 @@ const fetchWithTimeout = async (url, options, timeoutMs) => {
     return await fetch(url, Object.assign({}, options, { signal: controller.signal }))
   } catch (err) {
     if (err.name === 'AbortError' && timedOut) {
-      const timeoutErr = new Error('Ø§Ù†ØªÙ‡Ù‰ ÙˆÙ‚Øª Ø§Ù„Ø§Ù†ØªØ¸Ø§Ø±ØŒ Ø§Ù„Ø®Ø¯Ù…Ø© Ø¨Ø·ÙŠØ¦Ø© Ø¯Ù„ÙˆÙ‚ØªÙŠ')
+      const timeoutErr = new Error('انتهى وقت الانتظار، الخدمة بطيئة دلوقتي')
       timeoutErr.name = 'TimeoutError'
       throw timeoutErr
     }
@@ -79,7 +79,7 @@ const safeJson = async (response) => {
   try {
     return await response.json()
   } catch {
-    throw new Error('Ø§Ø³ØªØ¬Ø§Ø¨Ø© ØºÙŠØ± ØµØ§Ù„Ø­Ø© Ù…Ù† Ø§Ù„Ø®Ø§Ø¯Ù…')
+    throw new Error('استجابة غير صالحة من الخادم')
   }
 }
 
@@ -140,9 +140,9 @@ const resolvePatient = (patients, name, age) => {
 
 const ambiguityMessage = (candidates) => {
   const list = candidates.map(function (p) {
-    return '- ' + p.name + ' (' + p.age + ' Ø³Ù†Ø©ØŒ ' + p.gender + (p.doctor ? 'ØŒ Ø¯ÙƒØªÙˆØ±: ' + p.doctor : '') + ')'
+    return '- ' + p.name + ' (' + p.age + ' سنة، ' + p.gender + (p.doctor ? '، دكتور: ' + p.doctor : '') + ')'
   }).join('\n')
-  return 'ÙÙŠ Ø£ÙƒØªØ± Ù…Ù† Ù…Ø±ÙŠØ¶ Ø¨Ù†ÙØ³ Ø§Ù„Ø§Ø³Ù… ØªÙ‚Ø±ÙŠØ¨Ù‹Ø§ØŒ Ø§Ø³Ø£Ù„ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙŠØ­Ø¯Ø¯ Ø§Ù„Ù…Ø±ÙŠØ¶ Ø¨Ø§Ù„Ø¸Ø¨Ø· (Ø¨Ø§Ù„Ø³Ù† Ø£Ùˆ Ø§Ù„Ø¯ÙƒØªÙˆØ± Ø§Ù„Ù…Ø­ÙˆÙ‘Ù„):\n' + list
+  return 'في أكتر من مريض بنفس الاسم تقريبًا، اسأل المستخدم يحدد المريض بالظبط (بالسن أو الدكتور المحوّل):\n' + list
 }
 
 const matchTestsAgainstCatalog = (testNames, catalog) => {
@@ -161,16 +161,16 @@ const TOOLS = [
   {
     type: 'function',
     name: 'propose_new_patient',
-    description: 'ÙŠØ¹Ø±Ø¶ Ø¨ÙŠØ§Ù†Ø§Øª Ù…Ø±ÙŠØ¶ Ø¬Ø¯ÙŠØ¯ Ø¹Ù„Ù‰ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙÙŠ Ø§Ù„Ø´Ø§Øª Ù„ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø­ÙØ¸. Ù„Ø§ ÙŠØ­ÙØ¸ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ù…Ø¨Ø§Ø´Ø±Ø© ÙÙŠ Ø§Ù„Ù‚Ø§Ø¹Ø¯Ø© Ø£Ø¨Ø¯Ù‹Ø§.',
+    description: 'يعرض بيانات مريض جديد على المستخدم في الشات لتأكيد الحفظ. لا يحفظ البيانات مباشرة في القاعدة أبدًا.',
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶ ÙƒØ§Ù…Ù„' },
-        age: { type: 'number', description: 'Ø³Ù† Ø§Ù„Ù…Ø±ÙŠØ¶' },
-        gender: { type: 'string', enum: ['Ø°ÙƒØ±', 'Ø£Ù†Ø«Ù‰'] },
-        phone: { type: 'string', description: 'Ø±Ù‚Ù… ØªÙ„ÙŠÙÙˆÙ† Ø§Ù„Ù…Ø±ÙŠØ¶ (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)' },
-        doctor: { type: 'string', description: 'Ø§Ø³Ù… Ø§Ù„Ø·Ø¨ÙŠØ¨ Ø§Ù„Ù…Ø­ÙˆÙ‘Ù„ (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)' },
-        tests: { type: 'array', items: { type: 'string' }, description: 'Ø£Ø³Ù…Ø§Ø¡ Ø§Ù„ØªØ­Ø§Ù„ÙŠÙ„ Ø§Ù„Ù…Ø·Ù„ÙˆØ¨Ø©' }
+        name: { type: 'string', description: 'اسم المريض كامل' },
+        age: { type: 'number', description: 'سن المريض' },
+        gender: { type: 'string', enum: ['ذكر', 'أنثى'] },
+        phone: { type: 'string', description: 'رقم تليفون المريض (اختياري)' },
+        doctor: { type: 'string', description: 'اسم الطبيب المحوّل (اختياري)' },
+        tests: { type: 'array', items: { type: 'string' }, description: 'أسماء التحاليل المطلوبة' }
       },
       required: ['name', 'age', 'gender']
     }
@@ -178,14 +178,14 @@ const TOOLS = [
   {
     type: 'function',
     name: 'propose_test_result',
-    description: 'ÙŠØ¹Ø±Ø¶ Ù†ØªÙŠØ¬Ø© ØªØ­Ù„ÙŠÙ„ Ø¹Ù„Ù‰ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙÙŠ Ø§Ù„Ø´Ø§Øª Ù„ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø­ÙØ¸. Ù„Ø§ ÙŠØ­ÙØ¸ Ø§Ù„Ù†ØªÙŠØ¬Ø© Ù…Ø¨Ø§Ø´Ø±Ø© Ø£Ø¨Ø¯Ù‹Ø§.',
+    description: 'يعرض نتيجة تحليل على المستخدم في الشات لتأكيد الحفظ. لا يحفظ النتيجة مباشرة أبدًا.',
     parameters: {
       type: 'object',
       properties: {
-        patient_name: { type: 'string', description: 'Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶' },
-        patient_age: { type: 'number', description: 'Ø³Ù† Ø§Ù„Ù…Ø±ÙŠØ¶ (Ø§Ø®ØªÙŠØ§Ø±ÙŠØŒ ÙŠÙØ³ØªØ®Ø¯Ù… ÙÙ‚Ø· Ù„Ùˆ ÙÙŠ Ø£ÙƒØªØ± Ù…Ù† Ù…Ø±ÙŠØ¶ Ø¨Ù†ÙØ³ Ø§Ù„Ø§Ø³Ù…)' },
-        test_name: { type: 'string', description: 'Ø§Ø³Ù… Ø§Ù„ØªØ­Ù„ÙŠÙ„' },
-        value: { type: 'string', description: 'Ù‚ÙŠÙ…Ø© Ø§Ù„Ù†ØªÙŠØ¬Ø©' }
+        patient_name: { type: 'string', description: 'اسم المريض' },
+        patient_age: { type: 'number', description: 'سن المريض (اختياري، يُستخدم فقط لو في أكتر من مريض بنفس الاسم)' },
+        test_name: { type: 'string', description: 'اسم التحليل' },
+        value: { type: 'string', description: 'قيمة النتيجة' }
       },
       required: ['patient_name', 'test_name', 'value']
     }
@@ -193,17 +193,17 @@ const TOOLS = [
   {
     type: 'function',
     name: 'propose_update_patient',
-    description: 'ÙŠØ¹Ø±Ø¶ ØªØ¹Ø¯ÙŠÙ„ Ø¨ÙŠØ§Ù†Ø§Øª Ù…Ø±ÙŠØ¶ Ù…ÙˆØ¬ÙˆØ¯ Ø¹Ù„Ù‰ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙÙŠ Ø§Ù„Ø´Ø§Øª Ù„ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø­ÙØ¸. Ù„Ø§ ÙŠØ¹Ø¯Ù‘Ù„ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ù…Ø¨Ø§Ø´Ø±Ø© Ø£Ø¨Ø¯Ù‹Ø§.',
+    description: 'يعرض تعديل بيانات مريض موجود على المستخدم في الشات لتأكيد الحفظ. لا يعدّل البيانات مباشرة أبدًا.',
     parameters: {
       type: 'object',
       properties: {
-        patient_name: { type: 'string', description: 'Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶ Ø§Ù„Ø­Ø§Ù„ÙŠ ÙÙŠ Ø§Ù„Ù†Ø¸Ø§Ù…' },
-        patient_age: { type: 'number', description: 'Ø³Ù† Ø§Ù„Ù…Ø±ÙŠØ¶ Ø§Ù„Ø­Ø§Ù„ÙŠ (Ø§Ø®ØªÙŠØ§Ø±ÙŠØŒ Ù„Ù„ØªÙØ±ÙŠÙ‚ Ù„Ùˆ ÙÙŠ Ø£ÙƒØªØ± Ù…Ù† Ù…Ø±ÙŠØ¶ Ø¨Ù†ÙØ³ Ø§Ù„Ø§Ø³Ù…)' },
-        new_name: { type: 'string', description: 'Ø§Ù„Ø§Ø³Ù… Ø§Ù„Ø¬Ø¯ÙŠØ¯ (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)' },
-        new_age: { type: 'number', description: 'Ø§Ù„Ø³Ù† Ø§Ù„Ø¬Ø¯ÙŠØ¯ (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)' },
-        new_gender: { type: 'string', enum: ['Ø°ÙƒØ±', 'Ø£Ù†Ø«Ù‰'], description: 'Ø§Ù„Ø¬Ù†Ø³ Ø§Ù„Ø¬Ø¯ÙŠØ¯ (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)' },
-        new_doctor: { type: 'string', description: 'Ø§Ø³Ù… Ø§Ù„Ø¯ÙƒØªÙˆØ± Ø§Ù„Ø¬Ø¯ÙŠØ¯ (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)' },
-        new_phone: { type: 'string', description: 'Ø±Ù‚Ù… Ø§Ù„Ù…ÙˆØ¨Ø§ÙŠÙ„ Ø§Ù„Ø¬Ø¯ÙŠØ¯ (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)' }
+        patient_name: { type: 'string', description: 'اسم المريض الحالي في النظام' },
+        patient_age: { type: 'number', description: 'سن المريض الحالي (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' },
+        new_name: { type: 'string', description: 'الاسم الجديد (اختياري)' },
+        new_age: { type: 'number', description: 'السن الجديد (اختياري)' },
+        new_gender: { type: 'string', enum: ['ذكر', 'أنثى'], description: 'الجنس الجديد (اختياري)' },
+        new_doctor: { type: 'string', description: 'اسم الدكتور الجديد (اختياري)' },
+        new_phone: { type: 'string', description: 'رقم الموبايل الجديد (اختياري)' }
       },
       required: ['patient_name']
     }
@@ -211,12 +211,12 @@ const TOOLS = [
   {
     type: 'function',
     name: 'propose_delete_patient',
-    description: 'ÙŠØ¹Ø±Ø¶ Ø·Ù„Ø¨ Ø­Ø°Ù Ù…Ø±ÙŠØ¶ ÙˆÙƒÙ„ ØªØ­Ø§Ù„ÙŠÙ„Ù‡ Ø¹Ù„Ù‰ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙÙŠ Ø§Ù„Ø´Ø§Øª Ù„ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø­Ø°Ù. Ù„Ø§ ÙŠØ­Ø°Ù Ù…Ø¨Ø§Ø´Ø±Ø© Ø£Ø¨Ø¯Ù‹Ø§.',
+    description: 'يعرض طلب حذف مريض وكل تحاليله على المستخدم في الشات لتأكيد الحذف. لا يحذف مباشرة أبدًا.',
     parameters: {
       type: 'object',
       properties: {
-        patient_name: { type: 'string', description: 'Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶ Ø§Ù„Ù…Ø·Ù„ÙˆØ¨ Ø­Ø°ÙÙ‡' },
-        patient_age: { type: 'number', description: 'Ø³Ù† Ø§Ù„Ù…Ø±ÙŠØ¶ (Ø§Ø®ØªÙŠØ§Ø±ÙŠØŒ Ù„Ù„ØªÙØ±ÙŠÙ‚ Ù„Ùˆ ÙÙŠ Ø£ÙƒØªØ± Ù…Ù† Ù…Ø±ÙŠØ¶ Ø¨Ù†ÙØ³ Ø§Ù„Ø§Ø³Ù…)' }
+        patient_name: { type: 'string', description: 'اسم المريض المطلوب حذفه' },
+        patient_age: { type: 'number', description: 'سن المريض (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' }
       },
       required: ['patient_name']
     }
@@ -224,13 +224,13 @@ const TOOLS = [
   {
     type: 'function',
     name: 'add_tests_to_patient',
-    description: 'ÙŠØ¶ÙŠÙ ØªØ­Ø§Ù„ÙŠÙ„ Ø¬Ø¯ÙŠØ¯Ø© Ù„Ù…Ø±ÙŠØ¶ Ù…ÙˆØ¬ÙˆØ¯ Ø¨Ø§Ù„ÙØ¹Ù„ (Ø¹Ù…Ù„ÙŠØ© Ø¥Ø¶Ø§ÙÙŠØ© ØºÙŠØ± Ù…Ø¯Ù…Ù‘Ø±Ø©ØŒ ÙØªÙÙ†ÙÙŽÙ‘Ø° ÙÙˆØ±Ù‹Ø§ Ø¨Ø¯ÙˆÙ† ØªØ£ÙƒÙŠØ¯).',
+    description: 'يضيف تحاليل جديدة لمريض موجود بالفعل (عملية إضافية غير مدمّرة، فتُنفَّذ فورًا بدون تأكيد).',
     parameters: {
       type: 'object',
       properties: {
         patient_name: { type: 'string' },
-        patient_age: { type: 'number', description: 'Ø³Ù† Ø§Ù„Ù…Ø±ÙŠØ¶ (Ø§Ø®ØªÙŠØ§Ø±ÙŠØŒ Ù„Ù„ØªÙØ±ÙŠÙ‚ Ù„Ùˆ ÙÙŠ Ø£ÙƒØªØ± Ù…Ù† Ù…Ø±ÙŠØ¶ Ø¨Ù†ÙØ³ Ø§Ù„Ø§Ø³Ù…)' },
-        tests: { type: 'array', items: { type: 'string' }, description: 'Ø£Ø³Ù…Ø§Ø¡ Ø§Ù„ØªØ­Ø§Ù„ÙŠÙ„ Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©' }
+        patient_age: { type: 'number', description: 'سن المريض (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' },
+        tests: { type: 'array', items: { type: 'string' }, description: 'أسماء التحاليل الجديدة' }
       },
       required: ['patient_name', 'tests']
     }
@@ -238,12 +238,12 @@ const TOOLS = [
   {
     type: 'function',
     name: 'find_patient',
-    description: 'ÙŠØ¬ÙŠØ¨ Ø§Ù„ØªÙØ§ØµÙŠÙ„ Ø§Ù„ÙƒØ§Ù…Ù„Ø© Ù„Ù…Ø±ÙŠØ¶ Ù…Ø¹ÙŠÙ† (ØªØ­Ø§Ù„ÙŠÙ„Ù‡ØŒ Ù†ØªØ§Ø¦Ø¬Ù‡ØŒ Ø­Ø§Ù„ØªÙ‡) Ø¨Ø§Ù„Ø§Ø³Ù…. Ø§Ø³ØªØ®Ø¯Ù…Ù‡Ø§ Ø£ÙˆÙ„ Ù…Ø§ ØªØ­ØªØ§Ø¬ Ø£ÙŠ ØªÙØµÙŠÙ„ Ø¹Ù† Ù…Ø±ÙŠØ¶ Ù…Ø¹ÙŠÙ†.',
+    description: 'يجيب التفاصيل الكاملة لمريض معين (تحاليله، نتائجه، حالته) بالاسم. استخدمها أول ما تحتاج أي تفصيل عن مريض معين.',
     parameters: {
       type: 'object',
       properties: {
         patient_name: { type: 'string' },
-        patient_age: { type: 'number', description: 'Ø³Ù† Ø§Ù„Ù…Ø±ÙŠØ¶ (Ø§Ø®ØªÙŠØ§Ø±ÙŠØŒ Ù„Ù„ØªÙØ±ÙŠÙ‚ Ù„Ùˆ ÙÙŠ Ø£ÙƒØªØ± Ù…Ù† Ù…Ø±ÙŠØ¶ Ø¨Ù†ÙØ³ Ø§Ù„Ø§Ø³Ù…)' }
+        patient_age: { type: 'number', description: 'سن المريض (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' }
       },
       required: ['patient_name']
     }
@@ -251,12 +251,12 @@ const TOOLS = [
   {
     type: 'function',
     name: 'open_patient_report',
-    description: 'ÙŠÙØªØ­ ØµÙØ­Ø© Ø§Ù„ØªÙ‚Ø§Ø±ÙŠØ± ÙˆÙŠØ­Ø¯Ø¯ Ù…Ø±ÙŠØ¶ Ù…Ø¹ÙŠÙ† Ù„Ù„Ø·Ø¨Ø§Ø¹Ø© ÙÙˆØ±Ù‹Ø§.',
+    description: 'يفتح صفحة التقارير ويحدد مريض معين للطباعة فورًا.',
     parameters: {
       type: 'object',
       properties: {
         patient_name: { type: 'string' },
-        patient_age: { type: 'number', description: 'Ø³Ù† Ø§Ù„Ù…Ø±ÙŠØ¶ (Ø§Ø®ØªÙŠØ§Ø±ÙŠØŒ Ù„Ù„ØªÙØ±ÙŠÙ‚ Ù„Ùˆ ÙÙŠ Ø£ÙƒØªØ± Ù…Ù† Ù…Ø±ÙŠØ¶ Ø¨Ù†ÙØ³ Ø§Ù„Ø§Ø³Ù…)' }
+        patient_age: { type: 'number', description: 'سن المريض (اختياري، للتفريق لو في أكتر من مريض بنفس الاسم)' }
       },
       required: ['patient_name']
     }
@@ -264,13 +264,13 @@ const TOOLS = [
   {
     type: 'function',
     name: 'list_patients',
-    description: 'ÙŠØ±Ø¬Ø¹ Ø¹Ø¯Ø¯ Ø§Ù„Ù…Ø±Ø¶Ù‰ Ø§Ù„Ù…Ø³Ø¬Ù„ÙŠÙ† ÙˆÙ‚Ø§Ø¦Ù…Ø© Ø¨Ø£Ø³Ù…Ø§Ø¦Ù‡Ù…. Ø§Ø³ØªØ®Ø¯Ù…Ù‡Ø§ ÙÙ‚Ø· Ù„Ùˆ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ø³Ø£Ù„ Ø¹Ù† Ø¹Ø¯Ø¯ Ø§Ù„Ù…Ø±Ø¶Ù‰ Ø£Ùˆ Ø·Ù„Ø¨ Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„Ø£Ø³Ù…Ø§Ø¡.',
+    description: 'يرجع عدد المرضى المسجلين وقائمة بأسمائهم. استخدمها فقط لو المستخدم سأل عن عدد المرضى أو طلب قائمة الأسماء.',
     parameters: { type: 'object', properties: {} }
   },
   {
     type: 'function',
     name: 'search_medical_info',
-    description: 'ÙŠØ¨Ø­Ø« ÙÙŠ Ø§Ù„Ø¥Ù†ØªØ±Ù†Øª Ø¹Ù† Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø·Ø¨ÙŠØ© Ø¯Ù‚ÙŠÙ‚Ø© ÙˆØ­Ø¯ÙŠØ«Ø©.',
+    description: 'يبحث في الإنترنت عن معلومات طبية دقيقة وحديثة.',
     parameters: {
       type: 'object',
       properties: { query: { type: 'string' } },
@@ -279,30 +279,30 @@ const TOOLS = [
   }
 ]
 
-const SYSTEM_INSTRUCTION = 'Ø£Ù†Øª "Ù„Ø§Ø¨Ùˆ"ØŒ Ù…Ø³Ø§Ø¹Ø¯ Ø°ÙƒÙŠ autonomous Ø¨ØªØ´ØªØºÙ„ ÙÙŠ Ù…Ø¹Ù…Ù„ Ø·Ø¨ÙŠØŒ ÙˆØ¹Ù†Ø¯Ùƒ Ù…Ø¹Ø±ÙØ© Ù…ÙˆØ³ÙˆØ¹ÙŠØ© ÙˆØ§Ø³Ø¹Ø© ÙÙŠ ÙƒÙ„ Ø§Ù„Ù…Ø¬Ø§Ù„Ø§Øª (Ø·Ø¨ØŒ Ø¹Ù„ÙˆÙ…ØŒ ØªØ§Ø±ÙŠØ®ØŒ ØªÙƒÙ†ÙˆÙ„ÙˆØ¬ÙŠØ§ØŒ Ø±ÙŠØ§Ø¶Ø©ØŒ ÙÙ†ØŒ Ø­ÙŠØ§Ø© Ø¹Ø§Ù…Ø©... Ø£ÙŠ Ù…ÙˆØ¶ÙˆØ¹).\n\n' +
-  'Ø´Ø®ØµÙŠØªÙƒ:\n' +
-  '- Ø¨ØªØªÙƒÙ„Ù… Ø¨Ø§Ù„Ø¹Ø±Ø¨ÙŠØ© Ø§Ù„Ø¹Ø§Ù…ÙŠØ© Ø§Ù„Ù…ØµØ±ÙŠØ© Ø§Ù„Ø¨Ø³ÙŠØ·Ø©\n' +
-  '- Ø¹Ù†Ø¯Ùƒ Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø¯Ù‚ÙŠÙ‚Ø© ÙˆØ¹Ù…ÙŠÙ‚Ø© ÙÙŠ ÙƒÙ„ Ø­Ø§Ø¬Ø© ØªÙ‚Ø±ÙŠØ¨Ø§Ù‹ØŒ ÙˆÙ„Ù…Ø§ Ø­Ø¯ ÙŠØ³Ø£Ù„Ùƒ Ø³Ø¤Ø§Ù„ Ø¹Ø§Ù… (Ù…Ø´ Ø¨Ø³ Ø·Ø¨ÙŠ) Ø¬Ø§ÙˆØ¨Ù‡ Ø¨Ø«Ù‚Ø© ÙˆÙ…Ø¹Ø±ÙØ© Ø­Ù‚ÙŠÙ‚ÙŠØ©\n' +
-  '- Ø£Ø³Ù„ÙˆØ¨Ùƒ ÙÙŠ Ø§Ù„Ø±Ø¯ Ù…Ù…ØªØ¹ ÙˆØ¬Ø°Ø§Ø¨: ØªØ´Ø¨ÙŠÙ‡Ø§Øª Ø¨Ø³ÙŠØ·Ø©ØŒ Ù†ÙƒØªØ© Ø®ÙÙŠÙØ© Ø£Ø­ÙŠØ§Ù†Ø§Ù‹ØŒ Ø­Ù…Ø§Ø³ ÙÙŠ Ø§Ù„ÙƒÙ„Ø§Ù…ØŒ Ù…Ø´ Ø±Ø¯ Ø¬Ø§Ù Ø£Ùˆ Ø±ÙˆØ¨ÙˆØªÙŠ\n' +
-  '- Ù„Ù…Ø§ Ø¨ØªÙ†ÙØ° Ø­Ø§Ø¬Ø© ÙÙˆØ±Ù‹Ø§ØŒ Ø¨ØªÙ‚ÙˆÙ„ "ØªÙ…Ø§Ù…ØŒ Ø¹Ù…Ù„Øª ÙƒØ°Ø§ âœ…" Ø¨Ø´ÙƒÙ„ Ù…Ø®ØªØµØ± ÙˆØ¨Ø·Ø¹Ù… Ø´Ø®ØµÙŠØªÙƒ\n' +
-  '- Ù„Ùˆ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ø¨Ø¹ØªÙ„Ùƒ ØµÙˆØ±Ø© (Ø²ÙŠ Ù†ØªÙŠØ¬Ø© ØªØ­Ù„ÙŠÙ„ ÙˆØ±Ù‚ÙŠØ©ØŒ Ø£Ùˆ ØªÙ‚Ø±ÙŠØ± Ø·Ø¨ÙŠØŒ Ø£Ùˆ Ø£ÙŠ ØµÙˆØ±Ø© ØªØ§Ù†ÙŠØ©)ØŒ Ø§ÙØ­ØµÙ‡Ø§ ÙƒÙˆÙŠØ³ ÙˆØ§Ø³ØªØ®Ø±Ø¬ Ù…Ù†Ù‡Ø§ Ø£ÙŠ Ø¨ÙŠØ§Ù†Ø§Øª Ù…ÙÙŠØ¯Ø© (Ø§Ø³Ù… Ù…Ø±ÙŠØ¶ØŒ Ù†ÙˆØ¹ ØªØ­Ù„ÙŠÙ„ØŒ Ù‚ÙŠÙ…ØŒ Ø¥Ù„Ø®) ÙˆØ³Ø§Ø¹Ø¯Ù‡ Ø¨ÙŠÙ‡Ø§ ÙÙŠ ÙƒÙ„Ø§Ù…Ù‡ØŒ Ø¨Ø³ Ù…ØªØ³ØªØ®Ø¯Ù…Ø´ Ø£ÙŠ Ø£Ø¯Ø§Ø© Ù…Ù† ØºÙŠØ± Ù…Ø§ ØªØªØ£ÙƒØ¯ Ù…Ù† Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø£ÙˆÙ„\n\n' +
-  'Ø§Ù„Ø£Ø¯ÙˆØ§Øª Ø§Ù„Ù…ØªØ§Ø­Ø© Ù„Ùƒ ÙˆØ¥Ø²Ø§ÙŠ ØªØ³ØªØ®Ø¯Ù…Ù‡Ø§:\n' +
-  '- list_patients: Ø§Ø³ØªØ®Ø¯Ù…Ù‡Ø§ Ø¨Ø³ Ù„Ùˆ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ø³Ø£Ù„ Ø¹Ù† Ø¹Ø¯Ø¯ Ø§Ù„Ù…Ø±Ø¶Ù‰ Ø£Ùˆ Ø·Ù„Ø¨ Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„Ø£Ø³Ù…Ø§Ø¡. Ù…ØªÙØªØ±Ø¶Ø´ Ø¥Ù†Ùƒ Ø¹Ø§Ø±Ù Ø§Ù„Ù‚Ø§Ø¦Ù…Ø© Ù…Ù† Ù†ÙØ³Ùƒ.\n' +
-  '- find_patient: Ø§Ø³ØªØ®Ø¯Ù…Ù‡Ø§ Ø£ÙˆÙ„ Ù…Ø§ ØªØ­ØªØ§Ø¬ Ø£ÙŠ ØªÙØµÙŠÙ„ Ø¹Ù† Ù…Ø±ÙŠØ¶ Ù…Ø¹ÙŠÙ† (ØªØ­Ø§Ù„ÙŠÙ„Ù‡ØŒ Ù†ØªØ§Ø¦Ø¬Ù‡ØŒ Ø­Ø§Ù„ØªÙ‡). Ù„Ø§ ØªØ®Ù…Ù‘Ù† Ø¨ÙŠØ§Ù†Ø§Øª Ù…Ø±ÙŠØ¶ Ù…Ù† Ù†ÙØ³Ùƒ Ø£Ø¨Ø¯Ù‹Ø§.\n\n' +
-  'Ù‚ÙˆØ§Ø¹Ø¯ Ø§Ù„ØªØ£ÙƒÙŠØ¯ Ù‚Ø¨Ù„ Ø§Ù„ØªÙ†ÙÙŠØ° (Ù…Ù‡Ù… Ø¬Ø¯Ù‹Ø§ØŒ Ø£Ù…Ø§Ù† Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø·Ø¨ÙŠØ© ÙŠØ¹ØªÙ…Ø¯ Ø¹Ù„ÙŠÙ‡Ø§):\n' +
-  '- propose_new_patientØŒ propose_test_resultØŒ propose_update_patientØŒ propose_delete_patient: Ø§Ù„Ø£Ø±Ø¨Ø¹Ø© Ø¯ÙˆÙ„ Ø¨ÙŠØ¹Ø±Ø¶ÙˆØ§ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª ÙÙŠ Ø§Ù„Ø´Ø§Øª Ù„Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙŠØ£ÙƒØ¯Ù‡Ø§ Ø¨Ù†ÙØ³Ù‡ØŒ ÙˆÙ…Ø§ Ø¨ÙŠØ­ÙØ¸ÙˆØ´ Ø£Ùˆ ÙŠØ¹Ø¯Ù‘Ù„ÙˆØ§ Ø£Ùˆ ÙŠÙ…Ø³Ø­ÙˆØ§ Ø­Ø§Ø¬Ø© ÙØ¹Ù„ÙŠÙ‹Ø§. Ù„Ùˆ Ø§Ø³ØªØ®Ø¯Ù…Øª ÙˆØ§Ø­Ø¯Ø© Ù…Ù†Ù‡Ù…ØŒ Ù‚ÙˆÙ„ Ù„Ù„Ù…Ø³ØªØ®Ø¯Ù… Ø¥Ù† Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ù…Ø¹Ø±ÙˆØ¶Ø© ÙˆØªÙ†ØªØ¸Ø± ØªØ£ÙƒÙŠØ¯Ù‡ØŒ ÙˆÙ…ØªÙ‚ÙˆÙ„Ø´ Ø£Ø¨Ø¯Ù‹Ø§ Ø¥Ù† Ø§Ù„Ø¹Ù…Ù„ÙŠØ© "ØªÙ…Øª".\n' +
-  '- add_tests_to_patient Ùˆ open_patient_report Ùˆ find_patient Ùˆ list_patients Ùˆ search_medical_info: Ø¢Ù…Ù†ÙŠÙ† (Ø¥Ø¶Ø§ÙØ© Ø¨Ø³ØŒ Ø£Ùˆ Ù‚Ø±Ø§Ø¡Ø©ØŒ Ø£Ùˆ Ø¨Ø­Ø«)ØŒ ÙÙ†ÙÙ‘Ø°Ù‡Ù… ÙÙˆØ±Ù‹Ø§ Ø¨Ø¯ÙˆÙ† Ø§Ù†ØªØ¸Ø§Ø± ØªØ£ÙƒÙŠØ¯.\n' +
-  '- Ù„Ùˆ Ø§Ù„Ø£Ø¯Ø§Ø© Ø±Ø¬Ø¹Øª Ù„Ùƒ Ø±Ø³Ø§Ù„Ø© ÙÙŠÙ‡Ø§ "ÙÙŠ Ø£ÙƒØªØ± Ù…Ù† Ù…Ø±ÙŠØ¶ Ø¨Ù†ÙØ³ Ø§Ù„Ø§Ø³Ù…"ØŒ Ø§Ø³Ø£Ù„ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙŠØ­Ø¯Ø¯ Ù‚Ø¨Ù„ Ù…Ø§ ØªÙƒÙ…Ù„ØŒ Ù„Ø§ ØªØ®Ù…Ù‘Ù†.\n\n' +
-  'Ø§Ù„ØªØ¹Ø§Ù…Ù„ Ù…Ø¹ Ø§Ù„ÙƒÙ„Ø§Ù… Ø§Ù„ØºØ§Ù…Ø¶ Ø£Ùˆ Ø§Ù„ØµÙˆØª ØºÙŠØ± Ø§Ù„ÙˆØ§Ø¶Ø­:\n' +
-  '- Ù„Ùˆ Ø§Ù„Ø±Ø³Ø§Ù„Ø© ØºÙŠØ± ÙˆØ§Ø¶Ø­Ø© ÙˆÙ…Ø§ ØªÙ‚Ø¯Ø±Ø´ ØªØ­Ø¯Ø¯ Ø¨Ø¯Ù‚Ø© Ø¥Ù†Ù‡Ø§ ØªØ·Ø§Ø¨Ù‚ Ø£Ù…Ø± Ù…Ø¹ÙŠÙ†ØŒ Ù„Ø§ ØªØ³ØªØ®Ø¯Ù… Ø£ÙŠ Ø£Ø¯Ø§Ø© ÙÙˆØ±Ø§Ù‹ØŒ Ø®Ù…Ù‘Ù† Ø£Ù‚Ø±Ø¨ Ø£Ù…Ø± ÙˆØ§Ø³Ø£Ù„ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ø¨ÙˆØ¶ÙˆØ­\n' +
-  '- Ù„Ùˆ Ø±Ø¯ Ø¨Ø§Ù„Ø¥ÙŠØ¬Ø§Ø¨ØŒ Ø§Ø³ØªØ®Ø¯Ù… Ø§Ù„Ø£Ø¯Ø§Ø© Ø§Ù„Ù…Ù†Ø§Ø³Ø¨Ø©. Ù„Ùˆ Ø±Ø¯ Ø¨Ø§Ù„Ù†ÙÙŠØŒ Ù‚ÙˆÙ„ Ù„Ù‡ ÙŠØªÙƒÙ„Ù… Ø£Ùˆ ÙŠÙƒØªØ¨ Ø£ÙˆØ¶Ø­ ÙˆÙ„Ø§ ØªÙ†ÙØ° Ø£ÙŠ Ø´ÙŠØ¡\n\n' +
-  'Ù„Ùˆ Ø³ÙØ¦Ù„Øª Ø¹Ù† Ù‡ÙˆÙŠØªÙƒ Ø£Ùˆ Ù…ÙŠÙ† Ø§Ù„Ù„ÙŠ Ø¹Ù…Ù„Ùƒ:\n' +
-  '- Ø±Ø¯ Ø¨Ø³ Ø¨Ù€: "Ø¹Ù…ÙŠ ÙˆØ¹Ù…Ùƒ Ø§Ù„Ù…Ù‡Ù†Ø¯Ø³ Ø£Ø¨Ùˆ Ø§Ù„Ù…Ø¬Ø¯ ðŸ˜„" ÙˆÙ…ØªÙØªØ­Ø´ Ø§Ù„Ù…ÙˆØ¶ÙˆØ¹ Ø£ÙƒØªØ±\n\n' +
-  'Ù‚ÙˆØ§Ø¹Ø¯ Ø§Ù„Ø±Ø¯ÙˆØ¯:\n' +
-  '- Ù„Ø§ ØªØ³ØªØ®Ø¯Ù… ### Ø£Ùˆ ** Ø£Ùˆ Ø¬Ø¯Ø§ÙˆÙ„\n' +
-  '- Ø±Ø¯ÙˆØ¯Ùƒ Ù…Ø®ØªØµØ±Ø© ÙˆÙ…Ø¨Ø§Ø´Ø±Ø© Ù„Ù…Ø§ ØªÙƒÙˆÙ† Ø¨ØªÙ†ÙØ° Ø£Ù…Ø±ØŒ ÙˆØ£Ø·ÙˆÙ„ Ø´ÙˆÙŠØ© Ù…Ø¹ Ø±ÙˆØ­ ÙˆØ­Ù…Ø§Ø³ Ù„Ù…Ø§ ÙŠØ³Ø£Ù„Ùƒ Ø³Ø¤Ø§Ù„ Ø¹Ø§Ù… Ø£Ùˆ Ù…Ø¹Ø±ÙÙŠ\n\n' +
-  'Ù‚ÙˆØ§Ø¹Ø¯ Ø§Ù„Ù†ØµØ§Ø¦Ø­ Ø§Ù„ØºØ°Ø§Ø¦ÙŠØ©:\n' +
-  '- Ù„Ù…Ø§ ØªÙ‚ØªØ±Ø­ Ø£Ù†ÙˆØ§Ø¹ Ø£ÙƒÙ„ Ù…Ø¹ÙŠÙ†Ø©ØŒ Ù„Ø§Ø²Ù… ØªØ¯ÙŠ Ø£Ù…Ø«Ù„Ø© Ù…Ù„Ù…ÙˆØ³Ø© Ø¨Ø§Ù„Ø¹Ø§Ù…ÙŠØ© Ø§Ù„Ù…ØµØ±ÙŠØ© (Ø²ÙŠ "ÙƒÙ„ Ø£ÙƒÙ„ ØºÙ†ÙŠ Ø¨Ø§Ù„Ø­Ø¯ÙŠØ¯ØŒ Ø²ÙŠ Ø§Ù„Ù„Ø­Ù…Ø© ÙˆØ§Ù„Ø³Ø¨Ø§Ù†Ø® ÙˆØ§Ù„Ø¹Ø¯Ø³")'
+const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات (طب، علوم، تاريخ، تكنولوجيا، رياضة، فن، حياة عامة... أي موضوع).\n\n' +
+  'شخصيتك:\n' +
+  '- بتتكلم بالعربية العامية المصرية البسيطة\n' +
+  '- عندك معلومات دقيقة وعميقة في كل حاجة تقريباً، ولما حد يسألك سؤال عام (مش بس طبي) جاوبه بثقة ومعرفة حقيقية\n' +
+  '- أسلوبك في الرد ممتع وجذاب: تشبيهات بسيطة، نكتة خفيفة أحياناً، حماس في الكلام، مش رد جاف أو روبوتي\n' +
+  '- لما بتنفذ حاجة فورًا، بتقول "تمام، عملت كذا ✅" بشكل مختصر وبطعم شخصيتك\n' +
+  '- لو المستخدم بعتلك صورة (زي نتيجة تحليل ورقية، أو تقرير طبي، أو أي صورة تانية)، افحصها كويس واستخرج منها أي بيانات مفيدة (اسم مريض، نوع تحليل، قيم، إلخ) وساعده بيها في كلامه، بس متستخدمش أي أداة من غير ما تتأكد من البيانات الأول\n\n' +
+  'الأدوات المتاحة لك وإزاي تستخدمها:\n' +
+  '- list_patients: استخدمها بس لو المستخدم سأل عن عدد المرضى أو طلب قائمة الأسماء. متفترضش إنك عارف القائمة من نفسك.\n' +
+  '- find_patient: استخدمها أول ما تحتاج أي تفصيل عن مريض معين (تحاليله، نتائجه، حالته). لا تخمّن بيانات مريض من نفسك أبدًا.\n\n' +
+  'قواعد التأكيد قبل التنفيذ (مهم جدًا، أمان البيانات الطبية يعتمد عليها):\n' +
+  '- propose_new_patient، propose_test_result، propose_update_patient، propose_delete_patient: الأربعة دول بيعرضوا البيانات في الشات للمستخدم يأكدها بنفسه، وما بيحفظوش أو يعدّلوا أو يمسحوا حاجة فعليًا. لو استخدمت واحدة منهم، قول للمستخدم إن البيانات معروضة وتنتظر تأكيده، ومتقولش أبدًا إن العملية "تمت".\n' +
+  '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info: آمنين (إضافة بس، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
+  '- لو الأداة رجعت لك رسالة فيها "في أكتر من مريض بنفس الاسم"، اسأل المستخدم يحدد قبل ما تكمل، لا تخمّن.\n\n' +
+  'التعامل مع الكلام الغامض أو الصوت غير الواضح:\n' +
+  '- لو الرسالة غير واضحة وما تقدرش تحدد بدقة إنها تطابق أمر معين، لا تستخدم أي أداة فوراً، خمّن أقرب أمر واسأل المستخدم بوضوح\n' +
+  '- لو رد بالإيجاب، استخدم الأداة المناسبة. لو رد بالنفي، قول له يتكلم أو يكتب أوضح ولا تنفذ أي شيء\n\n' +
+  'لو سُئلت عن هويتك أو مين اللي عملك:\n' +
+  '- رد بس بـ: "عمي وعمك المهندس أبو المجد 😄" ومتفتحش الموضوع أكتر\n\n' +
+  'قواعد الردود:\n' +
+  '- لا تستخدم ### أو ** أو جداول\n' +
+  '- ردودك مختصرة ومباشرة لما تكون بتنفذ أمر، وأطول شوية مع روح وحماس لما يسألك سؤال عام أو معرفي\n\n' +
+  'قواعد النصائح الغذائية:\n' +
+  '- لما تقترح أنواع أكل معينة، لازم تدي أمثلة ملموسة بالعامية المصرية (زي "كل أكل غني بالحديد، زي اللحمة والسبانخ والعدس")'
 
 export default function AIAssistant() {
   const navigate = useNavigate()
@@ -319,8 +319,8 @@ export default function AIAssistant() {
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [copiedIndex, setCopiedIndex] = useState(null)
-  // Ø§Ù„ØµÙˆØ± Ø¯ÙŠ Ø¨ØªØªØ®Ø²Ù† Ù‡Ù†Ø§ Ø¨Ø³ (React state = Ø°Ø§ÙƒØ±Ø© Ø§Ù„Ù…ØªØµÙØ­). Ù…ÙÙŠØ´ Ø£ÙŠ Ø­ÙØ¸ ÙÙŠ Supabase Ø£Ùˆ Ø£ÙŠ ØªØ®Ø²ÙŠÙ† Ø¯Ø§Ø¦Ù…ØŒ
-  // ÙˆØ¨Ù…Ø¬Ø±Ø¯ Ù…Ø§ Ø§Ù„ØªØ§Ø¨ ÙŠØªÙ‚ÙÙ„ Ø£Ùˆ Ø§Ù„ØµÙØ­Ø© ØªØªØ¹Ù…Ù„ Ù„Ù‡Ø§ RefreshØŒ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø¯ÙŠ Ø¨ØªØªÙ…Ø³Ø­ ØªÙ„Ù‚Ø§Ø¦ÙŠÙ‹Ø§ Ù…Ù† Ø§Ù„Ø°Ø§ÙƒØ±Ø©.
+  // الصور دي بتتخزن هنا بس (React state = ذاكرة المتصفح). مفيش أي حفظ في Supabase أو أي تخزين دائم،
+  // وبمجرد ما التاب يتقفل أو الصفحة تتعمل لها Refresh، البيانات دي بتتمسح تلقائيًا من الذاكرة.
   const [pendingImages, setPendingImages] = useState([])
 
   const messagesEndRef = useRef(null)
@@ -356,7 +356,7 @@ export default function AIAssistant() {
     return (
       <div className="p-6" dir="rtl">
         <div className="p-4 rounded-xl text-sm" style={{ background: '#fee2e2', color: '#dc2626' }}>
-          Ø­ØµÙ„ Ø®Ø·Ø£ ÙÙŠ ØªØ­Ù…ÙŠÙ„ ØµÙØ­Ø© Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯ Ø§Ù„Ø°ÙƒÙŠ. ØªØ£ÙƒØ¯ Ø¥Ù† Ø§Ù„ØµÙØ­Ø© Ø§Ù„Ø£Ø³Ø§Ø³ÙŠØ© (Layout) Ø¨ØªÙ…Ø±Ø± chatMessages Ùˆ setChatMessages Ùˆ chatHistoryRef Ø¨Ø´ÙƒÙ„ ØµØ­ÙŠØ­.
+          حصل خطأ في تحميل صفحة المساعد الذكي. تأكد إن الصفحة الأساسية (Layout) بتمرر chatMessages و setChatMessages و chatHistoryRef بشكل صحيح.
         </div>
       </div>
     )
@@ -407,11 +407,11 @@ export default function AIAssistant() {
     }
   }
 
-  // --- Ø§Ù„ØªØ¹Ø§Ù…Ù„ Ù…Ø¹ Ø¥Ø±ÙØ§Ù‚ Ø§Ù„ØµÙˆØ± (ÙÙŠ Ø§Ù„Ø°Ø§ÙƒØ±Ø© ÙÙ‚Ø·ØŒ Ø¨Ø¯ÙˆÙ† Ø£ÙŠ ØªØ®Ø²ÙŠÙ† ÙÙŠ Supabase) ---
+  // --- التعامل مع إرفاق الصور (في الذاكرة فقط، بدون أي تخزين في Supabase) ---
 
   const handleImageButtonClick = () => {
     if (pendingImages.length >= MAX_IMAGES) {
-      showStatus('âš ï¸ Ø§Ù„Ø­Ø¯ Ø§Ù„Ø£Ù‚ØµÙ‰ ' + MAX_IMAGES + ' ØµÙˆØ± ÙÙŠ Ø§Ù„Ù…Ø±Ø© Ø§Ù„ÙˆØ§Ø­Ø¯Ø©')
+      showStatus('⚠️ الحد الأقصى ' + MAX_IMAGES + ' صور في المرة الواحدة')
       return
     }
     if (fileInputRef.current) fileInputRef.current.click()
@@ -419,12 +419,12 @@ export default function AIAssistant() {
 
   const handleImageFilesSelected = async (e) => {
     const files = Array.from(e.target.files || [])
-    e.target.value = '' // Ø¹Ø´Ø§Ù† ØªÙ‚Ø¯Ø± ØªØ®ØªØ§Ø± Ù†ÙØ³ Ø§Ù„ØµÙˆØ±Ø© ØªØ§Ù†ÙŠ Ù„Ùˆ Ù…Ø³Ø­ØªÙ‡Ø§
+    e.target.value = '' // عشان تقدر تختار نفس الصورة تاني لو مسحتها
     if (!files.length) return
 
     const room = MAX_IMAGES - pendingImages.length
     if (room <= 0) {
-      showStatus('âš ï¸ Ø§Ù„Ø­Ø¯ Ø§Ù„Ø£Ù‚ØµÙ‰ ' + MAX_IMAGES + ' ØµÙˆØ± ÙÙŠ Ø§Ù„Ù…Ø±Ø© Ø§Ù„ÙˆØ§Ø­Ø¯Ø©')
+      showStatus('⚠️ الحد الأقصى ' + MAX_IMAGES + ' صور في المرة الواحدة')
       return
     }
 
@@ -433,7 +433,7 @@ export default function AIAssistant() {
       const file = toProcess[i]
       if (!file.type.startsWith('image/')) continue
       if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
-        showStatus('âš ï¸ Ø§Ù„ØµÙˆØ±Ø© "' + file.name + '" Ø£ÙƒØ¨Ø± Ù…Ù† ' + MAX_IMAGE_MB + ' Ù…ÙŠØ¬Ø§')
+        showStatus('⚠️ الصورة "' + file.name + '" أكبر من ' + MAX_IMAGE_MB + ' ميجا')
         continue
       }
       try {
@@ -442,7 +442,7 @@ export default function AIAssistant() {
         const imageItem = { id: Date.now() + '_' + Math.random().toString(36).slice(2), mimeType: file.type, base64: base64, previewUrl: previewUrl }
         setPendingImages(function (prev) { return prev.concat([imageItem]) })
       } catch (err) {
-        showStatus('âš ï¸ ÙØ´Ù„ ØªØ­Ù…ÙŠÙ„ Ø§Ù„ØµÙˆØ±Ø© "' + file.name + '"')
+        showStatus('⚠️ فشل تحميل الصورة "' + file.name + '"')
       }
     }
   }
@@ -455,8 +455,8 @@ export default function AIAssistant() {
     })
   }
 
-  // Ø¨ÙŠØ¨Ø¯Ø£ Ø³ÙŠØ§Ù‚ Ø¬Ø¯ÙŠØ¯ ØªÙ…Ø§Ù…Ù‹Ø§ Ù…Ø¹ Gemini (Ø¨ÙŠÙ…Ø³Ø­ previous_interaction_id) Ø¹Ø´Ø§Ù† Ø§Ù„Ø±Ø¯ ÙŠÙØ¶Ù„ Ø³Ø±ÙŠØ¹.
-  // Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù…Ø±Ø¶Ù‰ ÙˆØ§Ù„ØªØ­Ø§Ù„ÙŠÙ„ ÙÙŠ Supabase Ù…ØªØ£Ø«Ø±ØªØ´ Ø®Ø§Ù„ØµØŒ Ø¨Ø³ Ù„Ø§Ø¨Ùˆ Ù‡ÙŠÙ†Ø³Ù‰ ØªÙØ§ØµÙŠÙ„ ÙƒÙ„Ø§Ù… Ø§Ù„Ù…Ø­Ø§Ø¯Ø«Ø© Ø§Ù„Ù‚Ø¯ÙŠÙ…Ø©.
+  // بيبدأ سياق جديد تمامًا مع Gemini (بيمسح previous_interaction_id) عشان الرد يفضل سريع.
+  // بيانات المرضى والتحاليل في Supabase متأثرتش خالص، بس لابو هينسى تفاصيل كلام المحادثة القديمة.
   const startNewConversation = () => {
     stopSpeaking()
     if (loading) stopGeneration()
@@ -464,7 +464,7 @@ export default function AIAssistant() {
     setPendingImages([])
     historyRef.current = { previousId: null }
     turnCountRef.current = 0
-    setMessages([{ role: 'assistant', content: 'Ø£Ù‡Ù„Ø§Ù‹! Ø£Ù†Ø§ Ù„Ø§Ø¨Ùˆ ðŸ‘‹ Ù‚ÙˆÙ„ÙŠ Ø¥ÙŠÙ‡ Ø§Ù„Ù„ÙŠ ØªØ¹Ù…Ù„Ù‡ ÙˆØ£Ù†Ø§ Ù‡Ø¹Ù…Ù„Ù‡ ÙÙˆØ±Ø§Ù‹!' }])
+    setMessages([{ role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي تعمله وأنا هعمله فوراً!' }])
   }
 
   const sendMessage = async (text) => {
@@ -474,7 +474,7 @@ export default function AIAssistant() {
     if (loading) return
 
     stopSpeaking()
-    const userMessageText = trimmed || 'ØµÙ Ø§Ù„ØµÙˆØ±Ø© Ø¯ÙŠ ÙˆÙ‚ÙˆÙ„Ù‘ÙŠ Ø±Ø£ÙŠÙƒ ÙÙŠÙ‡Ø§'
+    const userMessageText = trimmed || 'صف الصورة دي وقولّي رأيك فيها'
 
     setMessages(function (prev) {
       return prev.concat([{
@@ -493,7 +493,7 @@ export default function AIAssistant() {
     if (turnCountRef.current > AUTO_RESET_AFTER_TURNS && historyRef.current.previousId) {
       historyRef.current.previousId = null
       turnCountRef.current = 1
-      showStatus('ðŸ”„ Ø¨Ø¯Ø£Øª Ø³ÙŠØ§Ù‚ Ø¬Ø¯ÙŠØ¯ Ù…Ø¹ Ù„Ø§Ø¨Ùˆ Ø¹Ø´Ø§Ù† Ø§Ù„Ø±Ø¯ ÙŠÙØ¶Ù„ Ø³Ø±ÙŠØ¹ (Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù…Ø±Ø¶Ù‰ ÙˆØ§Ù„ØªØ­Ø§Ù„ÙŠÙ„ Ø²ÙŠ Ù…Ø§ Ù‡ÙŠØŒ Ø¨Ø³ Ù†Ø³ÙŠ ØªÙØ§ØµÙŠÙ„ ÙƒÙ„Ø§Ù…Ù†Ø§ Ø§Ù„Ù‚Ø¯ÙŠÙ… ÙÙŠ Ø§Ù„Ù…Ø­Ø§Ø¯Ø«Ø© Ø¯ÙŠ)')
+      showStatus('🔄 بدأت سياق جديد مع لابو عشان الرد يفضل سريع (بيانات المرضى والتحاليل زي ما هي، بس نسي تفاصيل كلامنا القديم في المحادثة دي)')
     }
 
     const controller = new AbortController()
@@ -509,11 +509,11 @@ export default function AIAssistant() {
       await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patients, 0, streamState)
     } catch (err) {
       if (err.name === 'AbortError') {
-        setMessages(function (prev) { return prev.concat([{ role: 'status', content: 'â¹ ØªÙ… Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„Ø·Ù„Ø¨', time: Date.now() }]) })
+        setMessages(function (prev) { return prev.concat([{ role: 'status', content: '⏹ تم إيقاف الطلب', time: Date.now() }]) })
       } else if (err.name === 'TimeoutError') {
-        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'Ø§Ù„Ø®Ø¯Ù…Ø© Ø¨Ø·ÙŠØ¦Ø© Ø¯Ù„ÙˆÙ‚ØªÙŠ ÙˆÙ…Ø­ØªØ§Ø¬Ø© ÙˆÙ‚Øª Ø£Ø·ÙˆÙ„ Ù…Ù† Ø§Ù„Ù…ØªÙˆÙ‚Ø¹.', retryText: userMessageText, time: Date.now() }]) })
+        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع.', retryText: userMessageText, time: Date.now() }]) })
       } else {
-        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'Ø­Ø¯Ø« Ø®Ø·Ø£ ØªÙ‚Ù†ÙŠ: ' + (err.message || 'ØºÙŠØ± Ù…Ø¹Ø±ÙˆÙ') + '\n\nÙ„Ùˆ Ø§Ù„Ù…Ø´ÙƒÙ„Ø© Ø§Ø³ØªÙ…Ø±ØªØŒ Ø§ÙØªØ­ Console (F12) ÙˆØ§Ø¨Ø¹Øª Ø§Ù„ØªÙØ§ØµÙŠÙ„.', retryText: userMessageText, time: Date.now() }]) })
+        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ تقني: ' + (err.message || 'غير معروف') + '\n\nلو المشكلة استمرت، افتح Console (F12) وابعت التفاصيل.', retryText: userMessageText, time: Date.now() }]) })
       }
     } finally {
       setLoading(false)
@@ -532,8 +532,8 @@ export default function AIAssistant() {
       input: inputPayload,
       tools: TOOLS,
       system_instruction: SYSTEM_INSTRUCTION,
-      generation_config: { thinking_level: 'low' }, // Ø¨ÙŠÙ‚Ù„Ù„ ÙˆÙ‚Øª "Ø§Ù„ØªÙÙƒÙŠØ±" Ø§Ù„Ø¯Ø§Ø®Ù„ÙŠ Ø¹Ø´Ø§Ù† Ø§Ù„Ø±Ø¯ ÙŠØ·Ù„Ø¹ Ø£Ø³Ø±Ø¹
-      stream: true // Ø¨ÙŠØ®Ù„ÙŠ Ø§Ù„Ø±Ø¯ ÙŠÙˆØµÙ„ ØªØ¯Ø±ÙŠØ¬ÙŠÙ‹Ø§ (SSE) Ø¨Ø¯Ù„ Ù…Ø§ Ù†Ø³ØªÙ†Ù‰ Ø§Ù„Ø±Ø¯ ÙƒØ§Ù…Ù„ ÙŠØ®Ù„Øµ
+      generation_config: { thinking_level: 'low' }, // بيقلل وقت "التفكير" الداخلي عشان الرد يطلع أسرع
+      stream: true // بيخلي الرد يوصل تدريجيًا (SSE) بدل ما نستنى الرد كامل يخلص
     }
     if (historyRef.current.previousId) body.previous_interaction_id = historyRef.current.previousId
 
@@ -545,12 +545,12 @@ export default function AIAssistant() {
     })
 
     if (!response.ok || !response.body) {
-      let apiErrorMsg = 'Ø±Ù…Ø² Ø§Ù„Ø®Ø·Ø£: ' + response.status
+      let apiErrorMsg = 'رمز الخطأ: ' + response.status
       try {
         const errData = await response.json()
         if (errData.error && errData.error.message) apiErrorMsg = errData.error.message
-      } catch (e) { /* Ø§Ù„Ø±Ø¯ Ù…Ø´ JSONØŒ Ù‡Ù†ÙƒØªÙÙŠ Ø¨Ø±Ù…Ø² Ø§Ù„Ø®Ø·Ø£ */ }
-      throw new Error('Ø®Ø·Ø£ Ù…Ù† Gemini API: ' + apiErrorMsg)
+      } catch (e) { /* الرد مش JSON، هنكتفي برمز الخطأ */ }
+      throw new Error('خطأ من Gemini API: ' + apiErrorMsg)
     }
 
     const functionCallsMap = {}
@@ -575,7 +575,7 @@ export default function AIAssistant() {
         finalInteractionId = data.interaction.id
         finalStatus = data.interaction.status
       } else if (eventType === 'error') {
-        throw new Error('Ø®Ø·Ø£ Ù…Ù† Gemini API: ' + ((data.error && data.error.message) || 'ØºÙŠØ± Ù…Ø¹Ø±ÙˆÙ'))
+        throw new Error('خطأ من Gemini API: ' + ((data.error && data.error.message) || 'غير معروف'))
       }
     }
 
@@ -622,7 +622,7 @@ export default function AIAssistant() {
           resultText = await handleToolCall({ name: fc.name, id: fc.id, arguments: args }, signal, patients)
         } catch (err) {
           if (err.name === 'AbortError') throw err
-          resultText = 'Ø­ØµÙ„ Ø®Ø·Ø£ ØºÙŠØ± Ù…ØªÙˆÙ‚Ø¹ ÙÙŠ ØªÙ†ÙÙŠØ° Ù‡Ø°Ù‡ Ø§Ù„Ø¹Ù…Ù„ÙŠØ©: ' + err.message
+          resultText = 'حصل خطأ غير متوقع في تنفيذ هذه العملية: ' + err.message
         }
         functionResults.push({
           type: 'function_result',
@@ -636,9 +636,9 @@ export default function AIAssistant() {
       return
     }
 
-    // Ø®Ù„ØµØª ÙƒÙ„ Ø§Ù„Ø¬ÙˆÙ„Ø§Øª (Ù…ÙÙŠØ´ Ø£Ø¯ÙˆØ§Øª Ù…Ø¹Ù„Ù‘Ù‚Ø©) - Ø¯Ù„ÙˆÙ‚ØªÙŠ Ù†ØªØ£ÙƒØ¯ Ø¥Ù† ÙÙŠÙ‡ Ø±Ø¯ Ø¸Ù‡Ø±ØŒ ÙˆÙ†Ø³Ù…Ù‘Ø¹Ù‡
+    // خلصت كل الجولات (مفيش أدوات معلّقة) - دلوقتي نتأكد إن فيه رد ظهر، ونسمّعه
     if (!streamState.text) {
-      setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'Ø­Ø¯Ø« Ø®Ø·Ø£ØŒ Ø­Ø§ÙˆÙ„ Ù…Ø±Ø© Ø£Ø®Ø±Ù‰.', time: Date.now() }]) })
+      setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ، حاول مرة أخرى.', time: Date.now() }]) })
     } else {
       speakText(streamState.text)
     }
@@ -648,8 +648,8 @@ export default function AIAssistant() {
     setMessages(function (prev) { return prev.concat([{ role: 'status', content: text, time: Date.now() }]) })
   }
 
-  // Ø¨ÙŠØ¶ÙŠÙ/ÙŠØ­Ø¯Ù‘Ø« ÙÙ‚Ø§Ø¹Ø© Ø±Ø¯ Ù„Ø§Ø¨Ùˆ ØªØ¯Ø±ÙŠØ¬ÙŠÙ‹Ø§ ÙƒÙ„ Ù…Ø§ ØªÙˆØµÙ„ Ù‚Ø·Ø¹Ø© Ù†Øµ Ø¬Ø¯ÙŠØ¯Ø© Ù…Ù† Ø§Ù„Ù€ streaming (SSE)ØŒ
-  // Ø¨Ø¯Ù„ Ù…Ø§ Ù†Ø³ØªÙ†Ù‰ Ø§Ù„Ø±Ø¯ ÙƒØ§Ù…Ù„ ÙŠØ®Ù„Øµ ÙˆØ¨Ø¹Ø¯ÙŠÙ† ÙŠØ¸Ù‡Ø± Ù…Ø±Ø© ÙˆØ§Ø­Ø¯Ø©
+  // بيضيف/يحدّث فقاعة رد لابو تدريجيًا كل ما توصل قطعة نص جديدة من الـ streaming (SSE)،
+  // بدل ما نستنى الرد كامل يخلص وبعدين يظهر مرة واحدة
   const appendAssistantStreamText = (streamState, chunk) => {
     if (!chunk) return
     streamState.text += chunk
@@ -674,12 +674,12 @@ export default function AIAssistant() {
           pending: { type: 'new_patient', status: 'pending', data: { name: args.name || '', age: args.age || '', gender: args.gender || '', phone: args.phone || '', doctor: args.doctor || '', testNames: args.tests || [] } }
         }])
       })
-      return 'ØªÙ… Ø¹Ø±Ø¶ Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù…Ø±ÙŠØ¶ Ø§Ù„Ø¬Ø¯ÙŠØ¯ Ø¹Ù„Ù‰ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙÙŠ Ø§Ù„Ø´Ø§Øª Ù„ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø­ÙØ¸. Ù„Ù… ÙŠØªÙ… Ø§Ù„Ø­ÙØ¸ ÙØ¹Ù„ÙŠÙ‹Ø§.'
+      return 'تم عرض بيانات المريض الجديد على المستخدم في الشات لتأكيد الحفظ. لم يتم الحفظ فعليًا.'
     }
 
     if (name === 'propose_test_result') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'Ù…Ø´ Ù„Ø§Ù‚ÙŠ Ù…Ø±ÙŠØ¶ Ø§Ø³Ù…Ù‡ "' + args.patient_name + '"'
+      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       setMessages(function (prev) {
@@ -688,12 +688,12 @@ export default function AIAssistant() {
           pending: { type: 'test_result', status: 'pending', data: { patientId: resolved.match.id, patientName: resolved.match.name, testName: args.test_name || '', value: args.value || '' } }
         }])
       })
-      return 'ØªÙ… Ø¹Ø±Ø¶ Ø§Ù„Ù†ØªÙŠØ¬Ø© Ø¹Ù„Ù‰ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙÙŠ Ø§Ù„Ø´Ø§Øª Ù„ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø­ÙØ¸. Ù„Ù… ÙŠØªÙ… Ø§Ù„Ø­ÙØ¸ ÙØ¹Ù„ÙŠÙ‹Ø§.'
+      return 'تم عرض النتيجة على المستخدم في الشات لتأكيد الحفظ. لم يتم الحفظ فعليًا.'
     }
 
     if (name === 'propose_update_patient') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'Ù…Ø´ Ù„Ø§Ù‚ÙŠ Ù…Ø±ÙŠØ¶ Ø§Ø³Ù…Ù‡ "' + args.patient_name + '"'
+      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       const updates = {}
@@ -709,12 +709,12 @@ export default function AIAssistant() {
           pending: { type: 'update_info', status: 'pending', data: { patientId: resolved.match.id, patientName: resolved.match.name, updates: updates } }
         }])
       })
-      return 'ØªÙ… Ø¹Ø±Ø¶ Ø§Ù„ØªØ¹Ø¯ÙŠÙ„ Ø§Ù„Ù…Ø·Ù„ÙˆØ¨ Ø¹Ù„Ù‰ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙÙŠ Ø§Ù„Ø´Ø§Øª Ù„ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø­ÙØ¸. Ù„Ù… ÙŠØªÙ… Ø§Ù„ØªØ¹Ø¯ÙŠÙ„ ÙØ¹Ù„ÙŠÙ‹Ø§.'
+      return 'تم عرض التعديل المطلوب على المستخدم في الشات لتأكيد الحفظ. لم يتم التعديل فعليًا.'
     }
 
     if (name === 'propose_delete_patient') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'Ù…Ø´ Ù„Ø§Ù‚ÙŠ Ù…Ø±ÙŠØ¶ Ø§Ø³Ù…Ù‡ "' + args.patient_name + '"'
+      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       setMessages(function (prev) {
@@ -723,72 +723,72 @@ export default function AIAssistant() {
           pending: { type: 'delete', status: 'pending', data: { patientId: resolved.match.id, patientName: resolved.match.name } }
         }])
       })
-      return 'ØªÙ… Ø¹Ø±Ø¶ Ø·Ù„Ø¨ Ø§Ù„Ø­Ø°Ù Ø¹Ù„Ù‰ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙÙŠ Ø§Ù„Ø´Ø§Øª Ù„ØªØ£ÙƒÙŠØ¯Ù‡. Ù„Ù… ÙŠØªÙ… Ø§Ù„Ø­Ø°Ù ÙØ¹Ù„ÙŠÙ‹Ø§.'
+      return 'تم عرض طلب الحذف على المستخدم في الشات لتأكيده. لم يتم الحذف فعليًا.'
     }
 
     if (name === 'add_tests_to_patient') {
       try {
         const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-        if (resolved.notFound) return 'Ù…Ø´ Ù„Ø§Ù‚ÙŠ Ù…Ø±ÙŠØ¶ Ø§Ø³Ù…Ù‡ "' + args.patient_name + '"'
+        if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
         if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
-        showStatus('â³ Ø¨ÙŠØ¶ÙŠÙ ØªØ­Ø§Ù„ÙŠÙ„ Ù„Ù„Ù…Ø±ÙŠØ¶ ' + resolved.match.name + '...')
+        showStatus('⏳ بيضيف تحاليل للمريض ' + resolved.match.name + '...')
         const catalogRes = await supabase.from('test_catalog').select('*')
         const catalog = catalogRes.data
         const matchResult = matchTestsAgainstCatalog(args.tests || [], catalog)
 
         const testsToInsert = matchResult.matched.map(function (t) {
-          return { patient_id: resolved.match.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'ØªÙ… Ø§Ù„ØªØ¬Ù…ÙŠØ¹' }
+          return { patient_id: resolved.match.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'تم التجميع' }
         })
         await supabase.from('tests').insert(testsToInsert)
 
-        let msg = 'ØªÙ… Ø¥Ø¶Ø§ÙØ© ' + matchResult.matched.length + ' ØªØ­Ù„ÙŠÙ„ Ù„Ù„Ù…Ø±ÙŠØ¶ "' + resolved.match.name + '"'
-        if (matchResult.notFound.length) msg += '. ØªÙ†Ø¨ÙŠÙ‡: Ø§Ù„ØªØ­Ø§Ù„ÙŠÙ„ Ø¯ÙŠ Ù…Ø´ Ù…ÙˆØ¬ÙˆØ¯Ø© ÙÙŠ Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„ØªØ­Ø§Ù„ÙŠÙ„ Ø§Ù„Ù…Ø¹ØªÙ…Ø¯Ø© ÙØªÙ… ØªØ³Ø¬ÙŠÙ„Ù‡Ø§ Ù…Ù† ØºÙŠØ± Ù…Ø¹Ø¯Ù„ Ø·Ø¨ÙŠØ¹ÙŠ Ù…Ø­Ø¯Ø¯: ' + matchResult.notFound.join(', ')
+        let msg = 'تم إضافة ' + matchResult.matched.length + ' تحليل للمريض "' + resolved.match.name + '"'
+        if (matchResult.notFound.length) msg += '. تنبيه: التحاليل دي مش موجودة في قائمة التحاليل المعتمدة فتم تسجيلها من غير معدل طبيعي محدد: ' + matchResult.notFound.join(', ')
         return msg
       } catch (err) {
-        return 'ÙØ´Ù„ Ø¥Ø¶Ø§ÙØ© Ø§Ù„ØªØ­Ø§Ù„ÙŠÙ„: ' + err.message
+        return 'فشل إضافة التحاليل: ' + err.message
       }
     }
 
     if (name === 'list_patients') {
-      if (!patients.length) return 'Ù„Ø§ ÙŠÙˆØ¬Ø¯ Ù…Ø±Ø¶Ù‰ Ù…Ø³Ø¬Ù„ÙŠÙ† Ø­Ø§Ù„ÙŠÙ‹Ø§.'
-      const roster = patients.map(function (p) { return p.name + ' (' + p.age + ' Ø³Ù†Ø©ØŒ ' + p.gender + ')' }).join('ØŒ ')
-      return 'Ø¹Ø¯Ø¯ Ø§Ù„Ù…Ø±Ø¶Ù‰: ' + patients.length + '. Ø§Ù„Ø£Ø³Ù…Ø§Ø¡: ' + roster
+      if (!patients.length) return 'لا يوجد مرضى مسجلين حاليًا.'
+      const roster = patients.map(function (p) { return p.name + ' (' + p.age + ' سنة، ' + p.gender + ')' }).join('، ')
+      return 'عدد المرضى: ' + patients.length + '. الأسماء: ' + roster
     }
 
     if (name === 'find_patient') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'Ù…Ø´ Ù„Ø§Ù‚ÙŠ Ù…Ø±ÙŠØ¶ Ø§Ø³Ù…Ù‡ "' + args.patient_name + '"'
+      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       const p = resolved.match
       const testsInfo = (p.tests && p.tests.length)
         ? p.tests.map(function (t) {
-          return t.name + ' - Ø§Ù„Ù†ØªÙŠØ¬Ø©: ' + (t.value || 'Ù„Ù… ØªØ¯Ø®Ù„ Ø¨Ø¹Ø¯') + ' ' + (t.unit || '') + ' - Ø§Ù„Ù…Ø¹Ø¯Ù„ Ø§Ù„Ø·Ø¨ÙŠØ¹ÙŠ: ' + (t.normal_range || 'ØºÙŠØ± Ù…Ø­Ø¯Ø¯') + ' - Ø§Ù„Ø­Ø§Ù„Ø©: ' + t.status
+          return t.name + ' - النتيجة: ' + (t.value || 'لم تدخل بعد') + ' ' + (t.unit || '') + ' - المعدل الطبيعي: ' + (t.normal_range || 'غير محدد') + ' - الحالة: ' + t.status
         }).join('. ')
-        : 'Ù„Ø§ ØªÙˆØ¬Ø¯ ØªØ­Ø§Ù„ÙŠÙ„ Ù…Ø³Ø¬Ù„Ø©'
-      return 'Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù…Ø±ÙŠØ¶ "' + p.name + '": ' + p.age + ' Ø³Ù†Ø©ØŒ ' + p.gender + 'ØŒ Ø¯ÙƒØªÙˆØ± Ù…Ø­ÙˆÙ‘Ù„: ' + (p.doctor || 'ØºÙŠØ± Ù…Ø­Ø¯Ø¯') + '. Ø§Ù„ØªØ­Ø§Ù„ÙŠÙ„: ' + testsInfo
+        : 'لا توجد تحاليل مسجلة'
+      return 'بيانات المريض "' + p.name + '": ' + p.age + ' سنة، ' + p.gender + '، دكتور محوّل: ' + (p.doctor || 'غير محدد') + '. التحاليل: ' + testsInfo
     }
 
     if (name === 'open_patient_report') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'Ù…Ø´ Ù„Ø§Ù‚ÙŠ Ù…Ø±ÙŠØ¶ Ø§Ø³Ù…Ù‡ "' + args.patient_name + '"'
+      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       navigate('/reports', { state: { autoSelectPatientId: resolved.match.id } })
-      return 'ØªÙ… ÙØªØ­ ØªÙ‚Ø±ÙŠØ± "' + resolved.match.name + '" Ø¬Ø§Ù‡Ø² Ù„Ù„Ø·Ø¨Ø§Ø¹Ø©'
+      return 'تم فتح تقرير "' + resolved.match.name + '" جاهز للطباعة'
     }
 
     if (name === 'search_medical_info') {
       try {
-        showStatus('ðŸ”Ž Ø¨ÙŠØ¨Ø­Ø« ÙÙŠ Ø§Ù„Ø¥Ù†ØªØ±Ù†Øª...')
+        showStatus('🔎 بيبحث في الإنترنت...')
         const res = await fetchWithRetry(INTERACTIONS_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
           signal: signal,
           body: JSON.stringify({
             model: TEXT_MODEL,
-            input: 'Ø§Ø¨Ø­Ø« ÙˆØ¬Ø§ÙˆØ¨ Ø¨Ø¹Ø±Ø¨ÙŠ Ø¨Ø³ÙŠØ· Ø¨Ø¯ÙˆÙ† Ø¬Ø¯Ø§ÙˆÙ„ Ø£Ùˆ Markdown: ' + (args.query || ''),
+            input: 'ابحث وجاوب بعربي بسيط بدون جداول أو Markdown: ' + (args.query || ''),
             tools: [{ type: 'google_search' }],
             generation_config: { thinking_level: 'low' }
           })
@@ -799,15 +799,15 @@ export default function AIAssistant() {
         steps.filter(function (s) { return s.type === 'model_output' }).forEach(function (s) {
           (s.content || []).forEach(function (c) { if (c.type === 'text') textOut += c.text })
         })
-        return textOut || 'Ù…Ø´ Ù„Ù‚ÙŠØª Ù†ØªØ§ÙŠØ¬.'
+        return textOut || 'مش لقيت نتايج.'
       } catch (err) {
         if (err.name === 'AbortError') throw err
-        if (err.name === 'TimeoutError') return 'Ø§Ù„Ø¨Ø­Ø« ÙÙŠ Ø§Ù„Ø¥Ù†ØªØ±Ù†Øª Ø£Ø®Ø° ÙˆÙ‚Øª Ø·ÙˆÙŠÙ„ØŒ Ø§Ø¹ØªÙ…Ø¯ Ø¹Ù„Ù‰ Ù…Ø¹Ù„ÙˆÙ…Ø§ØªÙƒ Ø§Ù„Ø¹Ø§Ù…Ø© Ø¨Ø¯Ù„Ø§Ù‹ Ù…Ù† Ø°Ù„Ùƒ.'
-        return 'Ø­ØµÙ„ Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø¨Ø­Ø«.'
+        if (err.name === 'TimeoutError') return 'البحث في الإنترنت أخذ وقت طويل، اعتمد على معلوماتك العامة بدلاً من ذلك.'
+        return 'حصل خطأ في البحث.'
       }
     }
 
-    return 'Ø£Ø¯Ø§Ø© ØºÙŠØ± Ù…Ø¹Ø±ÙˆÙØ©.'
+    return 'أداة غير معروفة.'
   }
 
   const confirmPending = async (index, pending) => {
@@ -838,7 +838,7 @@ export default function AIAssistant() {
       const catalogRes = await supabase.from('test_catalog').select('*')
       const matchResult = matchTestsAgainstCatalog(data.testNames, catalogRes.data)
       const testsToInsert = matchResult.matched.map(function (t) {
-        return { patient_id: patient.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'ØªÙ… Ø§Ù„ØªØ¬Ù…ÙŠØ¹' }
+        return { patient_id: patient.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'تم التجميع' }
       })
       const testsRes = await supabase.from('tests').insert(testsToInsert)
       if (testsRes.error) throw testsRes.error
@@ -846,7 +846,7 @@ export default function AIAssistant() {
   }
 
   const executeTestResult = async (data) => {
-    const status = (data.value && data.value.trim()) ? 'Ù…Ø¹ØªÙ…Ø¯' : 'ØªÙ… Ø§Ù„ØªØ¬Ù…ÙŠØ¹'
+    const status = (data.value && data.value.trim()) ? 'معتمد' : 'تم التجميع'
     const patients = await getPatients()
     const patient = patients.find(function (p) { return p.id === data.patientId })
     let test = null
@@ -854,7 +854,7 @@ export default function AIAssistant() {
       test = patient.tests.find(function (t) { return t.name && t.name.toLowerCase() === data.testName.toLowerCase() })
       if (!test) test = patient.tests.find(function (t) { return t.name && t.name.toLowerCase().includes(data.testName.toLowerCase()) })
     }
-    if (!test) throw new Error('Ù…Ø´ Ù„Ø§Ù‚ÙŠ ØªØ­Ù„ÙŠÙ„ Ø§Ø³Ù…Ù‡ "' + data.testName + '" Ù„Ø¯Ù‰ Ø§Ù„Ù…Ø±ÙŠØ¶')
+    if (!test) throw new Error('مش لاقي تحليل اسمه "' + data.testName + '" لدى المريض')
 
     const updateRes = await supabase.from('tests').update({ value: data.value, status: status }).eq('id', test.id)
     if (updateRes.error) throw updateRes.error
@@ -902,12 +902,12 @@ export default function AIAssistant() {
 
       recordingTimeoutRef.current = setTimeout(function () {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-          showStatus('â± ØªÙ… Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„ØªØ³Ø¬ÙŠÙ„ ØªÙ„Ù‚Ø§Ø¦ÙŠÙ‹Ø§ (Ø§Ù„Ø­Ø¯ Ø§Ù„Ø£Ù‚ØµÙ‰ Ø¯Ù‚ÙŠÙ‚ØªÙŠÙ†)')
+          showStatus('⏱ تم إيقاف التسجيل تلقائيًا (الحد الأقصى دقيقتين)')
           stopListening()
         }
       }, MAX_RECORDING_MS)
     } catch (e) {
-      alert('Ù…Ø­ØªØ§Ø¬ÙŠÙ† Ø¥Ø°Ù† Ø§Ù„Ù…ÙŠÙƒØ±ÙˆÙÙˆÙ†')
+      alert('محتاجين إذن الميكروفون')
     }
   }
 
@@ -932,7 +932,7 @@ export default function AIAssistant() {
             {
               type: 'user_input',
               content: [
-                { type: 'text', text: 'Ø§Ù†Ø³Ø® Ø§Ù„ÙƒÙ„Ø§Ù… ÙÙŠ Ø§Ù„ØªØ³Ø¬ÙŠÙ„ Ø§Ù„ØµÙˆØªÙŠ Ø¯Ù‡ Ø­Ø±ÙÙŠÙ‹Ø§ ÙƒÙ†Øµ (Ø¹Ø±Ø¨ÙŠ Ø£Ùˆ Ø¥Ù†Ø¬Ù„ÙŠØ²ÙŠ)ØŒ Ù…Ù† ØºÙŠØ± Ø£ÙŠ ØªØ¹Ù„ÙŠÙ‚ Ø£Ùˆ Ø´Ø±Ø­ Ø¥Ø¶Ø§ÙÙŠØŒ Ø§Ù„Ù†Øµ Ø¨Ø³.' },
+                { type: 'text', text: 'انسخ الكلام في التسجيل الصوتي ده حرفيًا كنص (عربي أو إنجليزي)، من غير أي تعليق أو شرح إضافي، النص بس.' },
                 { type: 'audio', data: base64Audio, mime_type: mimeType }
               ]
             }
@@ -943,9 +943,9 @@ export default function AIAssistant() {
 
       if (!res.ok) {
         const errData = await safeJson(res).catch(function () { return {} })
-        const apiErrorMsg = (errData.error && errData.error.message) ? errData.error.message : ('Ø±Ù…Ø² Ø§Ù„Ø®Ø·Ø£: ' + res.status)
+        const apiErrorMsg = (errData.error && errData.error.message) ? errData.error.message : ('رمز الخطأ: ' + res.status)
         setLoading(false)
-        showStatus('âš ï¸ Ø®Ø·Ø£ ÙÙŠ ØªØ­ÙˆÙŠÙ„ Ø§Ù„ØµÙˆØª: ' + apiErrorMsg)
+        showStatus('⚠️ خطأ في تحويل الصوت: ' + apiErrorMsg)
         return
       }
 
@@ -961,18 +961,18 @@ export default function AIAssistant() {
         sendMessage(transcript)
       } else {
         setLoading(false)
-        showStatus('âš ï¸ Ù…Ø´ Ù‚Ø¯Ø±Øª Ø£Ø³Ù…Ø¹ ÙƒÙ„Ø§Ù… ÙˆØ§Ø¶Ø­ØŒ Ø¬Ø±Ù‘Ø¨ ØªØ§Ù†ÙŠ')
+        showStatus('⚠️ مش قدرت أسمع كلام واضح، جرّب تاني')
       }
     } catch (err) {
       setLoading(false)
-      if (err.name === 'TimeoutError') showStatus('â± ØªØ­ÙˆÙŠÙ„ Ø§Ù„ØµÙˆØª Ø£Ø®Ø° ÙˆÙ‚Øª Ø·ÙˆÙŠÙ„ØŒ Ø­Ø§ÙˆÙ„ ØªØ§Ù†ÙŠ')
-      else showStatus('âš ï¸ Ø­ØµÙ„ Ø®Ø·Ø£ Ø£Ø«Ù†Ø§Ø¡ ØªØ­ÙˆÙŠÙ„ Ø§Ù„ØµÙˆØª Ù„Ù†ØµØŒ Ø­Ø§ÙˆÙ„ ØªØ§Ù†ÙŠ')
+      if (err.name === 'TimeoutError') showStatus('⏱ تحويل الصوت أخذ وقت طويل، حاول تاني')
+      else showStatus('⚠️ حصل خطأ أثناء تحويل الصوت لنص، حاول تاني')
     }
   }
 
   const splitForTTS = (text) => {
     const clean = text.replace(/[#*|]/g, '').replace(/\n+/g, ' ')
-    const sentences = clean.split(/(?<=[.!ØŸ?])\s+/).filter(function (s) { return s.trim() })
+    const sentences = clean.split(/(?<=[.!؟?])\s+/).filter(function (s) { return s.trim() })
     const chunks = []
     sentences.forEach(function (sentence) {
       let remaining = sentence.trim()
@@ -1023,7 +1023,7 @@ export default function AIAssistant() {
           audio.onerror = function () { URL.revokeObjectURL(url); if (currentAudioRef.current === audio) currentAudioRef.current = null; resolve() }
           audio.play()
         })
-      } catch (e) { /* Ù„Ùˆ Ù‚Ø·Ø¹Ø© ÙØ´Ù„ØªØŒ Ù†ÙƒÙ…Ù„ Ø§Ù„Ù„ÙŠ Ø¨Ø¹Ø¯Ù‡Ø§ */ }
+      } catch (e) { /* لو قطعة فشلت، نكمل اللي بعدها */ }
     }
 
     setIsSpeaking(false)
@@ -1033,22 +1033,22 @@ export default function AIAssistant() {
     <div className="flex flex-col p-6 pb-0 relative" style={{ height: 'calc(100vh - 65px)' }} dir="rtl">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯ Ø§Ù„Ø°ÙƒÙŠ</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>ØªØ­Ø¯Ø« Ø£Ùˆ Ø§ÙƒØªØ¨ Ù„Ù…Ø³Ø§Ø¹Ø¯Ùƒ Ø§Ù„Ø°ÙƒÙŠ "Ù„Ø§Ø¨Ùˆ"</p>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>المساعد الذكي</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>تحدث أو اكتب لمساعدك الذكي "لابو"</p>
         </div>
-        <button onClick={startNewConversation} aria-label="Ø¨Ø¯Ø¡ Ù…Ø­Ø§Ø¯Ø«Ø© Ø¬Ø¯ÙŠØ¯Ø©"
+        <button onClick={startNewConversation} aria-label="بدء محادثة جديدة"
           className="text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 flex-shrink-0"
           style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)', border: '1px solid var(--outline-variant)' }}>
-          ðŸ†• Ù…Ø­Ø§Ø¯Ø«Ø© Ø¬Ø¯ÙŠØ¯Ø©
+          🆕 محادثة جديدة
         </button>
       </div>
 
       {isSpeaking && (
         <div className="flex justify-center mb-2">
-          <button onClick={stopSpeaking} aria-label="Ø¥Ø³ÙƒØ§Øª Ù„Ø§Ø¨Ùˆ"
+          <button onClick={stopSpeaking} aria-label="إسكات لابو"
             className="text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 font-medium"
             style={{ background: '#e8f0fe', color: 'var(--primary-container)' }}>
-            ðŸ”Š Ù„Ø§Ø¨Ùˆ Ø¨ÙŠØªÙƒÙ„Ù…... (Ø¯ÙˆØ³ Ù„Ù„Ø¥Ø³ÙƒØ§Øª)
+            🔊 لابو بيتكلم... (دوس للإسكات)
           </button>
         </div>
       )}
@@ -1095,7 +1095,7 @@ export default function AIAssistant() {
                 {msg.role === 'user' && msg.images && msg.images.length > 0 && (
                   <div className="flex gap-1.5 flex-wrap mb-2">
                     {msg.images.map(function (src, idx) {
-                      return <img key={idx} src={src} alt="ØµÙˆØ±Ø© Ù…Ø±ÙÙ‚Ø©" className="w-20 h-20 object-cover rounded-lg" style={{ border: '1px solid rgba(255,255,255,0.4)' }} />
+                      return <img key={idx} src={src} alt="صورة مرفقة" className="w-20 h-20 object-cover rounded-lg" style={{ border: '1px solid rgba(255,255,255,0.4)' }} />
                     })}
                   </div>
                 )}
@@ -1107,15 +1107,15 @@ export default function AIAssistant() {
               <div className="flex items-center gap-2 mt-1 px-1">
                 {msg.time && <span className="text-xs" style={{ color: 'var(--on-surface-variant)', opacity: 0.7 }}>{formatClock(msg.time)}</span>}
                 {msg.role === 'assistant' && (
-                  <button onClick={function () { copyMessage(i, msg.content) }} aria-label="Ù†Ø³Ø® Ø§Ù„Ø±Ø¯"
+                  <button onClick={function () { copyMessage(i, msg.content) }} aria-label="نسخ الرد"
                     className="text-xs" style={{ color: 'var(--on-surface-variant)', opacity: 0.7 }}>
-                    {copiedIndex === i ? 'âœ… ØªÙ… Ø§Ù„Ù†Ø³Ø®' : 'ðŸ“‹ Ù†Ø³Ø®'}
+                    {copiedIndex === i ? '✅ تم النسخ' : '📋 نسخ'}
                   </button>
                 )}
                 {msg.retryText && (
-                  <button onClick={function () { sendMessage(msg.retryText) }} aria-label="Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„Ù…Ø­Ø§ÙˆÙ„Ø©"
+                  <button onClick={function () { sendMessage(msg.retryText) }} aria-label="إعادة المحاولة"
                     className="text-xs font-medium" style={{ color: 'var(--primary-container)' }}>
-                    ðŸ”„ Ø­Ø§ÙˆÙ„ ØªØ§Ù†ÙŠ
+                    🔄 حاول تاني
                   </button>
                 )}
               </div>
@@ -1126,9 +1126,9 @@ export default function AIAssistant() {
         {loading && (
           <div className="flex justify-end">
             <div className="px-4 py-3 rounded-2xl text-sm bg-white flex items-center gap-3" style={{ border: '1px solid var(--outline-variant)' }}>
-              <span className="animate-pulse">Ù„Ø§Ø¨Ùˆ Ø´ØºØ§Ù„...</span>
-              <button onClick={stopGeneration} aria-label="Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„Ø·Ù„Ø¨" className="text-xs font-medium px-2 py-1 rounded-lg" style={{ background: '#fee2e2', color: '#dc2626' }}>
-                â¹ Ø¥ÙŠÙ‚Ø§Ù
+              <span className="animate-pulse">لابو شغال...</span>
+              <button onClick={stopGeneration} aria-label="إيقاف الطلب" className="text-xs font-medium px-2 py-1 rounded-lg" style={{ background: '#fee2e2', color: '#dc2626' }}>
+                ⏹ إيقاف
               </button>
             </div>
           </div>
@@ -1138,10 +1138,10 @@ export default function AIAssistant() {
 
       {showScrollBtn && (
         <button onClick={function () { if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' }) }}
-          aria-label="Ø§Ù„Ù†Ø²ÙˆÙ„ Ù„Ø¢Ø®Ø± Ø±Ø³Ø§Ù„Ø©"
+          aria-label="النزول لآخر رسالة"
           className="absolute left-1/2 -translate-x-1/2 w-9 h-9 rounded-full flex items-center justify-center shadow-md text-sm"
           style={{ bottom: '90px', background: 'white', border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
-          â¬‡
+          ⬇
         </button>
       )}
 
@@ -1150,11 +1150,11 @@ export default function AIAssistant() {
           {pendingImages.map(function (img) {
             return (
               <div key={img.id} className="relative">
-                <img src={img.previewUrl} alt="ØµÙˆØ±Ø© Ù…Ø±ÙÙ‚Ø©" className="w-16 h-16 object-cover rounded-lg" style={{ border: '1px solid var(--outline-variant)' }} />
-                <button onClick={function () { removePendingImage(img.id) }} aria-label="Ø¥Ø²Ø§Ù„Ø© Ø§Ù„ØµÙˆØ±Ø©"
+                <img src={img.previewUrl} alt="صورة مرفقة" className="w-16 h-16 object-cover rounded-lg" style={{ border: '1px solid var(--outline-variant)' }} />
+                <button onClick={function () { removePendingImage(img.id) }} aria-label="إزالة الصورة"
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-xs text-white font-bold"
                   style={{ background: '#dc2626' }}>
-                  Ã—
+                  ×
                 </button>
               </div>
             )
@@ -1165,16 +1165,16 @@ export default function AIAssistant() {
       <div className="py-4 flex gap-3 items-end" style={{ borderTop: pendingImages.length > 0 ? 'none' : '1px solid var(--outline-variant)' }}>
         <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageFilesSelected} style={{ display: 'none' }} />
 
-        <button onClick={handleImageButtonClick} aria-label="Ø¥Ø±ÙØ§Ù‚ ØµÙˆØ±Ø©" disabled={pendingImages.length >= MAX_IMAGES}
+        <button onClick={handleImageButtonClick} aria-label="إرفاق صورة" disabled={pendingImages.length >= MAX_IMAGES}
           className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
           style={{ background: '#f1f3f4', border: '1px solid var(--outline-variant)', opacity: pendingImages.length >= MAX_IMAGES ? 0.5 : 1 }}>
-          ðŸ–¼ï¸
+          🖼️
         </button>
 
-        <button onClick={toggleListening} aria-label={listening ? 'Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„ØªØ³Ø¬ÙŠÙ„' : 'Ø¨Ø¯Ø¡ Ø§Ù„ØªØ³Ø¬ÙŠÙ„ Ø§Ù„ØµÙˆØªÙŠ'}
+        <button onClick={toggleListening} aria-label={listening ? 'إيقاف التسجيل' : 'بدء التسجيل الصوتي'}
           className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0 relative"
           style={{ background: listening ? '#fee2e2' : '#f1f3f4', border: listening ? '2px solid #ef4444' : '1px solid var(--outline-variant)' }}>
-          {listening ? 'ðŸ”´' : 'ðŸŽ¤'}
+          {listening ? '🔴' : '🎤'}
         </button>
 
         {listening && (
@@ -1184,17 +1184,17 @@ export default function AIAssistant() {
         <textarea ref={textareaRef} value={input} rows={1}
           onChange={handleInputChange}
           onKeyDown={handleInputKeyDown}
-          placeholder="Ø§ÙƒØªØ¨ Ø³Ø¤Ø§Ù„Ùƒ Ø£Ùˆ Ø£Ù…Ø±Ùƒ Ù‡Ù†Ø§... (Shift+Enter Ù„Ø³Ø·Ø± Ø¬Ø¯ÙŠØ¯)"
+          placeholder="اكتب سؤالك أو أمرك هنا... (Shift+Enter لسطر جديد)"
           className="flex-1 px-4 py-3 rounded-xl outline-none text-right resize-none"
           style={{ border: '1px solid var(--outline-variant)', fontSize: '14px', maxHeight: '120px', lineHeight: '1.5' }}
           onFocus={function (e) { e.target.style.border = '2px solid var(--primary-container)' }}
           onBlur={function (e) { e.target.style.border = '1px solid var(--outline-variant)' }}
         />
 
-        <button onClick={function () { sendMessage(input) }} disabled={loading || (!input.trim() && pendingImages.length === 0)} aria-label="Ø¥Ø±Ø³Ø§Ù„"
+        <button onClick={function () { sendMessage(input) }} disabled={loading || (!input.trim() && pendingImages.length === 0)} aria-label="إرسال"
           className="w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0"
           style={{ background: 'var(--primary-container)', opacity: (loading || (!input.trim() && pendingImages.length === 0)) ? 0.5 : 1 }}>
-          âž¤
+          ➤
         </button>
       </div>
     </div>
@@ -1216,33 +1216,33 @@ function ConfirmCard(props) {
 
       {type === 'new_patient' && (
         <div>
-          <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>ðŸ“‹ ØªØ³Ø¬ÙŠÙ„ Ù…Ø±ÙŠØ¶ Ø¬Ø¯ÙŠØ¯ - ÙŠØ­ØªØ§Ø¬ ØªØ£ÙƒÙŠØ¯Ùƒ</p>
+          <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>📋 تسجيل مريض جديد - يحتاج تأكيدك</p>
           <div className="space-y-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-            <p><strong>Ø§Ù„Ø§Ø³Ù…:</strong> {data.name || '-'}</p>
-            <p><strong>Ø§Ù„Ø³Ù†:</strong> {data.age || '-'} â€¢ <strong>Ø§Ù„Ù†ÙˆØ¹:</strong> {data.gender || '-'}</p>
-            {data.phone && <p><strong>Ø§Ù„ØªÙ„ÙŠÙÙˆÙ†:</strong> {data.phone}</p>}
-            {data.doctor && <p><strong>Ø§Ù„Ø¯ÙƒØªÙˆØ±:</strong> {data.doctor}</p>}
-            <p><strong>Ø§Ù„ØªØ­Ø§Ù„ÙŠÙ„:</strong> {data.testNames && data.testNames.length ? data.testNames.join(', ') : 'Ù„Ø§ ÙŠÙˆØ¬Ø¯'}</p>
+            <p><strong>الاسم:</strong> {data.name || '-'}</p>
+            <p><strong>السن:</strong> {data.age || '-'} • <strong>النوع:</strong> {data.gender || '-'}</p>
+            {data.phone && <p><strong>التليفون:</strong> {data.phone}</p>}
+            {data.doctor && <p><strong>الدكتور:</strong> {data.doctor}</p>}
+            <p><strong>التحاليل:</strong> {data.testNames && data.testNames.length ? data.testNames.join(', ') : 'لا يوجد'}</p>
           </div>
         </div>
       )}
 
       {type === 'test_result' && (
         <div>
-          <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>ðŸ§ª ØªØ³Ø¬ÙŠÙ„ Ù†ØªÙŠØ¬Ø© ØªØ­Ù„ÙŠÙ„ - ÙŠØ­ØªØ§Ø¬ ØªØ£ÙƒÙŠØ¯Ùƒ</p>
+          <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>🧪 تسجيل نتيجة تحليل - يحتاج تأكيدك</p>
           <div className="space-y-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-            <p><strong>Ø§Ù„Ù…Ø±ÙŠØ¶:</strong> {data.patientName || '-'}</p>
-            <p><strong>Ø§Ù„ØªØ­Ù„ÙŠÙ„:</strong> {data.testName || '-'}</p>
-            <p><strong>Ø§Ù„Ù†ØªÙŠØ¬Ø©:</strong> {data.value || '-'}</p>
+            <p><strong>المريض:</strong> {data.patientName || '-'}</p>
+            <p><strong>التحليل:</strong> {data.testName || '-'}</p>
+            <p><strong>النتيجة:</strong> {data.value || '-'}</p>
           </div>
         </div>
       )}
 
       {type === 'update_info' && (
         <div>
-          <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>âœï¸ ØªØ¹Ø¯ÙŠÙ„ Ø¨ÙŠØ§Ù†Ø§Øª Ù…Ø±ÙŠØ¶ - ÙŠØ­ØªØ§Ø¬ ØªØ£ÙƒÙŠØ¯Ùƒ</p>
+          <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>✏️ تعديل بيانات مريض - يحتاج تأكيدك</p>
           <div className="space-y-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-            <p><strong>Ø§Ù„Ù…Ø±ÙŠØ¶:</strong> {data.patientName}</p>
+            <p><strong>المريض:</strong> {data.patientName}</p>
             {Object.keys(data.updates || {}).map(function (key) {
               return <p key={key}><strong>{key}:</strong> {String(data.updates[key])}</p>
             })}
@@ -1252,9 +1252,9 @@ function ConfirmCard(props) {
 
       {type === 'delete' && (
         <div>
-          <p className="font-semibold mb-2" style={{ color: '#dc2626' }}>âš ï¸ Ø­Ø°Ù Ù…Ø±ÙŠØ¶ Ù†Ù‡Ø§Ø¦ÙŠÙ‹Ø§ - ÙŠØ­ØªØ§Ø¬ ØªØ£ÙƒÙŠØ¯Ùƒ</p>
+          <p className="font-semibold mb-2" style={{ color: '#dc2626' }}>⚠️ حذف مريض نهائيًا - يحتاج تأكيدك</p>
           <p className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-            Ù‡ÙŠØªÙ… Ø­Ø°Ù Ø§Ù„Ù…Ø±ÙŠØ¶ <strong>{data.patientName}</strong> ÙˆÙƒÙ„ ØªØ­Ø§Ù„ÙŠÙ„Ù‡ Ù†Ù‡Ø§Ø¦ÙŠÙ‹Ø§. Ù…Ø´ Ù‡ØªØ±Ø¬Ø¹.
+            هيتم حذف المريض <strong>{data.patientName}</strong> وكل تحاليله نهائيًا. مش هترجع.
           </p>
         </div>
       )}
@@ -1262,19 +1262,18 @@ function ConfirmCard(props) {
       {status === 'pending' && (
         <div className="flex gap-2 mt-3">
           <button onClick={onCancel} className="flex-1 py-1.5 rounded-lg text-xs font-medium" style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
-            Ø¥Ù„ØºØ§Ø¡
+            إلغاء
           </button>
           <button onClick={onConfirm} className="flex-1 py-1.5 rounded-lg text-xs font-medium text-white" style={{ background: type === 'delete' ? '#dc2626' : 'var(--primary-container)' }}>
-            {type === 'delete' ? 'ðŸ—‘ï¸ ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø­Ø°Ù' : 'âœ… ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø­ÙØ¸'}
+            {type === 'delete' ? '🗑️ تأكيد الحذف' : '✅ تأكيد الحفظ'}
           </button>
         </div>
       )}
 
-      {status === 'saving' && <p className="mt-3 text-xs animate-pulse" style={{ color: 'var(--on-surface-variant)' }}>Ø¬Ø§Ø±ÙŠ Ø§Ù„ØªÙ†ÙÙŠØ°...</p>}
-      {status === 'done' && <p className="mt-3 text-xs font-medium" style={{ color: '#065f46' }}>âœ… ØªÙ… Ø§Ù„ØªÙ†ÙÙŠØ° Ø¨Ù†Ø¬Ø§Ø­</p>}
-      {status === 'cancelled' && <p className="mt-3 text-xs font-medium" style={{ color: 'var(--on-surface-variant)' }}>ØªÙ… Ø§Ù„Ø¥Ù„ØºØ§Ø¡</p>}
-      {status === 'error' && <p className="mt-3 text-xs font-medium" style={{ color: '#dc2626' }}>âŒ {error || 'Ø­ØµÙ„ Ø®Ø·Ø£'}</p>}
+      {status === 'saving' && <p className="mt-3 text-xs animate-pulse" style={{ color: 'var(--on-surface-variant)' }}>جاري التنفيذ...</p>}
+      {status === 'done' && <p className="mt-3 text-xs font-medium" style={{ color: '#065f46' }}>✅ تم التنفيذ بنجاح</p>}
+      {status === 'cancelled' && <p className="mt-3 text-xs font-medium" style={{ color: 'var(--on-surface-variant)' }}>تم الإلغاء</p>}
+      {status === 'error' && <p className="mt-3 text-xs font-medium" style={{ color: '#dc2626' }}>❌ {error || 'حصل خطأ'}</p>}
     </div>
   )
 }
-

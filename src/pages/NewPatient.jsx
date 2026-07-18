@@ -6,7 +6,6 @@ import useUnsavedChanges from '../hooks/useUnsavedChanges'
 
 export default function NewPatient() {
   const showToast = useToast()
-  useUnsavedChanges(!!(form.name.trim() || form.phone.trim() || selectedTests.length > 0 || selectedPanels.length > 0))
   const [form, setForm] = useState({ name: '', phone: '', age: '', birth_date: '', gender: '', doctor: '', notes: '' })
   const [testCatalog, setTestCatalog] = useState([])
   const [panels, setPanels] = useState([])
@@ -23,6 +22,8 @@ export default function NewPatient() {
   const [editingTest, setEditingTest] = useState(null)
   const [editingPanel, setEditingPanel] = useState(null)
   const [savingEdit, setSavingEdit] = useState(false)
+
+  useUnsavedChanges(!!(form.name.trim() || form.phone.trim() || selectedTests.length > 0 || selectedPanels.length > 0))
 
   useEffect(() => { fetchTests(); fetchPanels() }, [])
 
@@ -513,4 +514,3 @@ export default function NewPatient() {
     </div>
   )
 }
-
