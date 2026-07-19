@@ -636,11 +636,10 @@ export default function AIAssistant() {
       return
     }
 
-    // خلصت كل الجولات (مفيش أدوات معلّقة) - دلوقتي نتأكد إن فيه رد ظهر، ونسمّعه
+    // خلصت كل الجولات (مفيش أدوات معلّقة) - دلوقتي نتأكد إن فيه رد ظهر
+    // ملاحظة: مبقاش بيتقرا بصوت عالي تلقائيًا؛ المستخدم هو اللي بيدوس على زرار 🔊 لو عايز يسمعه
     if (!streamState.text) {
       setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ، حاول مرة أخرى.', time: Date.now() }]) })
-    } else {
-      speakText(streamState.text)
     }
   }
 
@@ -971,17 +970,32 @@ export default function AIAssistant() {
   }
 
   const splitForTTS = (text) => {
+    const MAX_CHUNK = 4000
     const clean = text.replace(/[#*|]/g, '').replace(/\n+/g, ' ')
     const sentences = clean.split(/(?<=[.!؟?])\s+/).filter(function (s) { return s.trim() })
     const chunks = []
+    let current = ''
     sentences.forEach(function (sentence) {
-      let remaining = sentence.trim()
-      while (remaining.length > 0) {
-        const piece = remaining.slice(0, 500)
-        remaining = remaining.slice(500)
-        if (piece.trim()) chunks.push(piece.trim())
+      const trimmed = sentence.trim()
+      if (!trimmed) return
+      if (trimmed.length > MAX_CHUNK) {
+        // جملة واحدة أطول من الحد الأقصى (نادر جدًا) - نفضّي اللي اتجمّع لحد دلوقتي، وبعدين نقسّمها هي بس
+        if (current) { chunks.push(current); current = '' }
+        let remaining = trimmed
+        while (remaining.length > 0) {
+          chunks.push(remaining.slice(0, MAX_CHUNK))
+          remaining = remaining.slice(MAX_CHUNK)
+        }
+        return
+      }
+      if (current && (current.length + trimmed.length + 1) > MAX_CHUNK) {
+        chunks.push(current)
+        current = trimmed
+      } else {
+        current = current ? current + ' ' + trimmed : trimmed
       }
     })
+    if (current) chunks.push(current)
     return chunks
   }
 
@@ -1110,6 +1124,12 @@ export default function AIAssistant() {
                   <button onClick={function () { copyMessage(i, msg.content) }} aria-label="نسخ الرد"
                     className="text-xs" style={{ color: 'var(--on-surface-variant)', opacity: 0.7 }}>
                     {copiedIndex === i ? '✅ تم النسخ' : '📋 نسخ'}
+                  </button>
+                )}
+                {msg.role === 'assistant' && msg.content && (
+                  <button onClick={function () { speakText(msg.content) }} aria-label="سماع الرد بصوت عالي"
+                    className="text-xs" style={{ color: 'var(--on-surface-variant)', opacity: 0.7 }}>
+                    🔊 اسمع
                   </button>
                 )}
                 {msg.retryText && (
