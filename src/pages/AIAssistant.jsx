@@ -331,6 +331,7 @@ export default function AIAssistant() {
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
   const abortControllerRef = useRef(null)
+  const isSendingRef = useRef(false) // قفل فوري يمنع إرسال مزدوج (ضغطة سريعة مرتين) - عكس state اللي بيتأخر شوية في التحديث
   const recordingTimeoutRef = useRef(null)
   const recordingIntervalRef = useRef(null)
   const currentAudioRef = useRef(null)
@@ -471,7 +472,8 @@ export default function AIAssistant() {
     const trimmed = (text || '').trim()
     const imagesToSend = pendingImages
     if (!trimmed && imagesToSend.length === 0) return
-    if (loading) return
+    if (isSendingRef.current) return // قفل فوري - بيمنع أي محاولة إرسال ثانية لحد ما الأولى تخلص تمامًا
+    isSendingRef.current = true
 
     stopSpeaking()
     const userMessageText = trimmed || 'صف الصورة دي وقولّي رأيك فيها'
@@ -513,9 +515,15 @@ export default function AIAssistant() {
       } else if (err.name === 'TimeoutError') {
         setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع.', retryText: userMessageText, time: Date.now() }]) })
       } else {
-        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ تقني: ' + (err.message || 'غير معروف') + '\n\nلو المشكلة استمرت، افتح Console (F12) وابعت التفاصيل.', retryText: userMessageText, time: Date.now() }]) })
+        const errMsg = err.message || 'غير معروف'
+        // لو الخطأ بسبب تجاوز الحصة (quota)، جوجل بتقول "Please retry in Xs" - نستخرج الرقم ده
+        // عشان نمنع المستخدم يدوس "حاول تاني" قبل ما الوقت ده يخلص فعليًا (كل محاولة مبكرة بترجّع نفس الخطأ)
+        const retryMatch = errMsg.match(/retry in ([\d.]+)s/i)
+        const retryUnlockAt = retryMatch ? Date.now() + Math.ceil(parseFloat(retryMatch[1])) * 1000 : null
+        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ تقني: ' + errMsg + '\n\nلو المشكلة استمرت، افتح Console (F12) وابعت التفاصيل.', retryText: userMessageText, retryUnlockAt: retryUnlockAt, time: Date.now() }]) })
       }
     } finally {
+      isSendingRef.current = false
       setLoading(false)
       abortControllerRef.current = null
       if (textareaRef.current) textareaRef.current.focus()
@@ -1133,10 +1141,7 @@ export default function AIAssistant() {
                   </button>
                 )}
                 {msg.retryText && (
-                  <button onClick={function () { sendMessage(msg.retryText) }} aria-label="إعادة المحاولة"
-                    className="text-xs font-medium" style={{ color: 'var(--primary-container)' }}>
-                    🔄 حاول تاني
-                  </button>
+                  <RetryButton retryText={msg.retryText} retryUnlockAt={msg.retryUnlockAt} onRetry={sendMessage} />
                 )}
               </div>
             </div>
@@ -1218,6 +1223,29 @@ export default function AIAssistant() {
         </button>
       </div>
     </div>
+  )
+}
+
+function RetryButton({ retryText, retryUnlockAt, onRetry }) {
+  const [remaining, setRemaining] = useState(function () {
+    return retryUnlockAt ? Math.max(0, Math.ceil((retryUnlockAt - Date.now()) / 1000)) : 0
+  })
+
+  useEffect(function () {
+    if (!retryUnlockAt) return
+    const interval = setInterval(function () {
+      setRemaining(Math.max(0, Math.ceil((retryUnlockAt - Date.now()) / 1000)))
+    }, 1000)
+    return function () { clearInterval(interval) }
+  }, [retryUnlockAt])
+
+  const locked = remaining > 0
+
+  return (
+    <button onClick={function () { if (!locked) onRetry(retryText) }} disabled={locked} aria-label="إعادة المحاولة"
+      className="text-xs font-medium" style={{ color: locked ? 'var(--on-surface-variant)' : 'var(--primary-container)', opacity: locked ? 0.7 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}>
+      {locked ? `⏱ حاول تاني بعد ${remaining} ث` : '🔄 حاول تاني'}
+    </button>
   )
 }
 
