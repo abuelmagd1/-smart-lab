@@ -41,9 +41,9 @@ export default function Layout() {
   const [settings, setSettings] = useState(() => {
     try {
       const saved = localStorage.getItem('appSettings')
-      return saved ? JSON.parse(saved) : { fontSize: 'medium', timeFormat: '12' }
+      return saved ? JSON.parse(saved) : { fontSize: 'medium', timeFormat: '12', darkMode: false }
     } catch {
-      return { fontSize: 'medium', timeFormat: '12' }
+      return { fontSize: 'medium', timeFormat: '12', darkMode: false }
     }
   })
 
@@ -56,6 +56,11 @@ export default function Layout() {
     const sizeMap = { small: '13px', medium: '15px', large: '17px' }
     document.body.style.fontSize = sizeMap[settings.fontSize]
   }, [settings.fontSize])
+
+  // تطبيق/إلغاء الوضع الليلي على عنصر <html> عشان يغطي الصفحة كلها بما فيها أي نوافذ منبثقة
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', !!settings.darkMode)
+  }, [settings.darkMode])
 
   const saveSettings = (newSettings) => {
     setSettings(newSettings)
@@ -335,6 +340,20 @@ export default function Layout() {
                             <div style={{ fontSize: '11px', opacity: 0.8 }}>{opt.example}</div>
                           </button>
                         ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium" style={{ color: 'var(--on-surface)' }}>🌙 الوضع الليلي</label>
+                        <button onClick={() => saveSettings({ ...settings, darkMode: !settings.darkMode })}
+                          aria-label="تبديل الوضع الليلي" aria-pressed={!!settings.darkMode}
+                          className="relative transition-all"
+                          style={{ width: '44px', height: '24px', borderRadius: '999px', background: settings.darkMode ? 'var(--primary-container)' : '#d1d5db' }}>
+                          <span className="absolute top-0.5 transition-all" style={{
+                            width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                            right: settings.darkMode ? '3px' : '23px',
+                          }} />
+                        </button>
                       </div>
                     </div>
                   </div>

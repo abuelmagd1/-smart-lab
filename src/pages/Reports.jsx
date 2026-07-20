@@ -5,6 +5,7 @@ import JsBarcode from 'jsbarcode'
 import { getBarcodeCode } from '../components/BarcodeLabel'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
+import { useToast } from '../components/Toast'
 
 const resultColor = {
   'طبيعي': { color: '#065f46', bg: '#d1fae5' },
@@ -81,6 +82,7 @@ const splitTests = (patient) => {
 
 export default function Reports() {
   const location = useLocation()
+  const showToast = useToast()
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -88,6 +90,12 @@ export default function Reports() {
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [historyRows, setHistoryRows] = useState([])
   const [settings, setSettings] = useState(null)
+  // اسم "الطابعة المعتادة للتقارير" - بيتحفظ في المتصفح نفسه (localStorage)، ده مجرد تذكير مش اختيار فعلي
+  // (المتصفح مايسمحش لأي موقع يختار طابعة تلقائيًا، ده قيد أمان من المتصفح نفسه مش حاجة نقدر نتخطاها)
+  const [preferredPrinter, setPreferredPrinter] = useState(() => {
+    try { return localStorage.getItem('reportPrinterName') || '' } catch { return '' }
+  })
+  const [editingPrinterName, setEditingPrinterName] = useState(false)
   const [design, setDesign] = useState({
     report_header_color: '#1a2456',
     report_table_color: '#1a2456',
@@ -337,8 +345,17 @@ export default function Reports() {
       '</table></div>'
   }
 
+  const savePreferredPrinter = (name) => {
+    setPreferredPrinter(name)
+    try { localStorage.setItem('reportPrinterName', name) } catch { /* ignore */ }
+  }
+
   const printReport = () => {
     if (!selectedPatient) return
+
+    if (preferredPrinter) {
+      showToast('🖨️ فاكرك اختار "' + preferredPrinter + '" من قائمة الطابعات في نافذة الطباعة', 'info', 6000)
+    }
 
     const barcodeCode = selectedPatient.barcode_seq
       ? getBarcodeCode(selectedPatient)
@@ -570,6 +587,51 @@ export default function Reports() {
     )
   }
 
+  // رسم بياني بسيط (Sparkline) لاتجاه قيمة معينة عبر الزيارات السابقة - SVG خام من غير أي مكتبة خارجية، صفر تكلفة
+  const TrendChart = ({ rows, metricKey, label, color }) => {
+    const points = rows
+      .map(r => ({ date: r.date, value: parseFloat(r.byName[metricKey]?.value) }))
+      .filter(p => !isNaN(p.value))
+      .reverse() // الصفوف جايه من الأحدث للأقدم، وعايزين نرسم من الأقدم للأحدث (يسار لليمين)
+
+    if (points.length < 2) return null
+
+    const width = 260
+    const height = 64
+    const padding = 8
+    const values = points.map(p => p.value)
+    const minV = Math.min(...values)
+    const maxV = Math.max(...values)
+    const range = maxV - minV || 1
+
+    const coords = points.map((p, i) => {
+      const x = padding + (i / (points.length - 1)) * (width - padding * 2)
+      const y = height - padding - ((p.value - minV) / range) * (height - padding * 2)
+      return { x, y, value: p.value }
+    })
+
+    const pathD = coords.map((c, i) => (i === 0 ? 'M' : 'L') + c.x.toFixed(1) + ',' + c.y.toFixed(1)).join(' ')
+    const lineColor = color || '#1a2456'
+
+    return (
+      <div style={{ marginTop: '10px', padding: '10px', background: '#f8f9fa', borderRadius: '10px' }}>
+        <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#374151', marginBottom: '4px' }}>
+          📈 اتجاه {label} عبر آخر {points.length} زيارات
+        </div>
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+          <path d={pathD} fill="none" stroke={lineColor} strokeWidth="2" />
+          {coords.map((c, i) => (
+            <circle key={i} cx={c.x} cy={c.y} r="3" fill={lineColor} />
+          ))}
+        </svg>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#6b7280' }}>
+          <span>أقل: {minV}</span>
+          <span>أعلى: {maxV}</span>
+        </div>
+      </div>
+    )
+  }
+
   const PreviewHistory = ({ colors, rows }) => {
     if (!rows.length) return null
     const tc = colors.tc
@@ -600,6 +662,8 @@ export default function Reports() {
             ))}
           </tbody>
         </table>
+        <TrendChart rows={rows} metricKey="Haemoglobin" label="الهيموجلوبين (Hgb)" color="#dc2626" />
+        <TrendChart rows={rows} metricKey="Platelet Count" label="الصفائح الدموية (PLT)" color="#1a2456" />
       </div>
     )
   }
@@ -868,10 +932,31 @@ export default function Reports() {
               {designSaved ? '✅ تم الحفظ' : savingDesign ? 'جاري...' : '💾 حفظ التصميم'}
             </button>
 
+            <div className="mt-4" style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '1rem' }}>
+              <label className="text-xs block mb-1" style={{ color: 'var(--on-surface-variant)' }}>🖨️ الطابعة المعتادة (تذكير بس)</label>
+              {editingPrinterName ? (
+                <input type="text" autoFocus defaultValue={preferredPrinter}
+                  placeholder="مثلاً: HP LaserJet مكتب الاستقبال"
+                  onBlur={e => { savePreferredPrinter(e.target.value.trim()); setEditingPrinterName(false) }}
+                  onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+                  className="w-full px-2 py-1.5 rounded-lg outline-none text-right text-xs"
+                  style={{ border: '1.5px solid var(--primary-container)' }} />
+              ) : (
+                <button onClick={() => setEditingPrinterName(true)}
+                  className="w-full px-2 py-1.5 rounded-lg text-right text-xs"
+                  style={{ border: '1px solid var(--outline-variant)', color: preferredPrinter ? 'var(--on-surface)' : 'var(--on-surface-variant)' }}>
+                  {preferredPrinter || 'اضغط لتحديد اسم الطابعة...'}
+                </button>
+              )}
+              <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)', opacity: 0.8 }}>
+                المتصفح مش بيسمح باختيار طابعة تلقائيًا، فده بس تذكير هيظهرلك وقت الطباعة.
+              </p>
+            </div>
+
             <button onClick={printReport}
               className="w-full py-2 rounded-lg text-xs font-medium text-white mt-2"
               style={{ background: '#1a2456' }}>
-              🖨ï¸ طباعة التقرير
+              🖨️ طباعة التقرير
             </button>
 
             <button onClick={() => setSelectedPatient(null)}

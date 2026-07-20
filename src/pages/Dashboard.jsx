@@ -139,6 +139,20 @@ export default function Dashboard() {
     done: todayTests.filter(t => t.status === 'معتمد').length,
   }
 
+  // تحاليل "متأخرة": لسه في حالة غير معتمدة وعدّى على تسجيل المريض أكتر من DELAY_THRESHOLD_HOURS
+  // (بنحسبها من وقت تسجيل المريض لأننا معندناش تاريخ منفصل لتغيير حالة كل تحليل)
+  const DELAY_THRESHOLD_HOURS = 3
+  const delayedItems = []
+  patients.forEach(p => {
+    const hoursSince = (now.getTime() - new Date(p.created_at).getTime()) / (1000 * 60 * 60)
+    if (hoursSince < DELAY_THRESHOLD_HOURS) return
+    ;(p.tests || []).forEach(t => {
+      if (inProgressStages.includes(t.status)) {
+        delayedItems.push({ patientName: p.name, testName: t.name, hoursSince: Math.floor(hoursSince) })
+      }
+    })
+  })
+
   const statCards = [
     { label: 'مرضى اليوم', value: stats.total, icon: '👥', color: '#1a73e8' },
     { label: 'تحاليل قيد التنفيذ اليوم', value: stats.pending, icon: '⏳', color: '#f59e0b' },
@@ -153,6 +167,24 @@ export default function Dashboard() {
           {getFormattedDate()} • {getFormattedTime()}
         </p>
       </div>
+
+      {!loading && delayedItems.length > 0 && (
+        <div className="rounded-xl p-4" style={{ background: '#fef3c7', border: '1px solid #fde68a' }}>
+          <p className="text-sm font-bold mb-2" style={{ color: '#92400e' }}>
+            ⏰ فيه {delayedItems.length} تحليل متأخر (عدّى عليه أكتر من {DELAY_THRESHOLD_HOURS} ساعات من غير اعتماد)
+          </p>
+          <div className="space-y-1">
+            {delayedItems.slice(0, 5).map((d, i) => (
+              <p key={i} className="text-xs" style={{ color: '#92400e' }}>
+                • <strong>{d.patientName}</strong> - {d.testName} (من {d.hoursSince} ساعة)
+              </p>
+            ))}
+            {delayedItems.length > 5 && (
+              <p className="text-xs" style={{ color: '#92400e' }}>و {delayedItems.length - 5} تحليل تاني...</p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {loading ? (

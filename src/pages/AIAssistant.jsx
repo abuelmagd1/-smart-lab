@@ -279,7 +279,23 @@ const TOOLS = [
   }
 ]
 
-const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات (طب، علوم، تاريخ، تكنولوجيا، رياضة، فن، حياة عامة... أي موضوع).\n\n' +
+// ردود جاهزة محلية للأسئلة الشائعة جدًا - بتشتغل من غير أي اتصال بـ Gemini خالص،
+// بتستخدم بس لما حصة الـ API تخلص عشان لابو يفضل مفيد حتى في أسوأ الحالات
+const OFFLINE_FAQ = [
+  { keys: ['سجل مريض', 'تسجيل مريض', 'مريض جديد'], answer: 'تقدر تسجّل مريض جديد من زرار "➕ مريض جديد" في القائمة الجانبية، أو من نفس الشات لو الخدمة الذكية رجعت شغالة.' },
+  { keys: ['نتائج', 'نتيجة التحليل', 'فين النتائج'], answer: 'نتائج التحاليل موجودة في صفحة "🔬 نتائج التحاليل" من القائمة الجانبية.' },
+  { keys: ['طباعة', 'اطبع', 'تقرير'], answer: 'تقدر تطبع تقرير أي مريض من صفحة "📄 التقارير"، اختار المريض ودوس "طباعة التقرير".' },
+  { keys: ['باركود'], answer: 'زرار الباركود موجود جنب كل مريض في صفحة "نتائج التحاليل".' },
+  { keys: ['ازيك', 'عامل ايه', 'اخبارك'], answer: 'أهلاً بيك! أنا لابو، بس دلوقتي شغال في وضع محدود لأن الخدمة الذكية مشغولة شوية. جرّب تاني بعد شوية أو استخدم القائمة الجانبية مباشرة.' },
+]
+
+const findOfflineAnswer = (userText) => {
+  const t = (userText || '').toLowerCase()
+  const match = OFFLINE_FAQ.find(function (f) { return f.keys.some(function (k) { return t.includes(k) }) })
+  return match ? match.answer : null
+}
+
+
   'شخصيتك:\n' +
   '- بتتكلم بالعربية العامية المصرية البسيطة\n' +
   '- عندك معلومات دقيقة وعميقة في كل حاجة تقريباً، ولما حد يسألك سؤال عام (مش بس طبي) جاوبه بثقة ومعرفة حقيقية\n' +
@@ -516,6 +532,16 @@ export default function AIAssistant() {
         setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'الخدمة بطيئة دلوقتي ومحتاجة وقت أطول من المتوقع.', retryText: userMessageText, time: Date.now() }]) })
       } else {
         const errMsg = err.message || 'غير معروف'
+        const isQuotaError = /quota|rate.?limit|resource_exhausted/i.test(errMsg)
+
+        if (isQuotaError) {
+          const offlineAnswer = findOfflineAnswer(userMessageText)
+          if (offlineAnswer) {
+            setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: '🔌 (رد جاهز محلي - الخدمة الذكية مشغولة دلوقتي)\n\n' + offlineAnswer, time: Date.now() }]) })
+            return
+          }
+        }
+
         // لو الخطأ بسبب تجاوز الحصة (quota)، جوجل بتقول "Please retry in Xs" - نستخرج الرقم ده
         // عشان نمنع المستخدم يدوس "حاول تاني" قبل ما الوقت ده يخلص فعليًا (كل محاولة مبكرة بترجّع نفس الخطأ)
         const retryMatch = errMsg.match(/retry in ([\d.]+)s/i)

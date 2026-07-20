@@ -25,6 +25,46 @@ const periodFilters = [
   { key: 'older', label: 'قبل ذلك' },
 ]
 
+// قائمة القيم الحرجة (Panic/Critical Values) لأشهر التحاليل - بمطابقة جزئية غير حساسة لحالة الأحرف على اسم التحليل.
+// أي قيمة أعلى من high أو أقل من low بتتحسب "حرجة" وتحتاج تنبيه فوري للدكتور، مش مجرد "مرتفع/منخفض" عادي.
+const CRITICAL_RANGES = [
+  { keys: ['glucose', 'fbs', 'جلوكوز', 'سكر'], low: 40, high: 500 },
+  { keys: ['potassium', 'بوتاسيوم'], low: 2.5, high: 6.5 },
+  { keys: ['sodium', 'صوديوم'], low: 120, high: 160 },
+  { keys: ['haemoglobin', 'hemoglobin', 'هيموجلوبين'], low: 5, high: null },
+  { keys: ['platelet', 'صفائح'], low: 20000, high: 1000000 },
+  { keys: ['creatinine', 'كرياتينين'], low: null, high: 10 },
+  { keys: ['wbcs - total', 'wbc', 'كرات بيضاء'], low: 1000, high: 40000 },
+]
+
+const checkCritical = (testName, rawValue) => {
+  if (!testName || rawValue === undefined || rawValue === null || rawValue === '') return false
+  const num = parseFloat(String(rawValue).replace(',', '.'))
+  if (isNaN(num)) return false
+  const nameLower = testName.toLowerCase()
+  const match = CRITICAL_RANGES.find(r => r.keys.some(k => nameLower.includes(k)))
+  if (!match) return false
+  if (match.low != null && num < match.low) return true
+  if (match.high != null && num > match.high) return true
+  return false
+}
+
+const CriticalBadge = () => (
+  <span className="text-xs font-bold px-1.5 py-0.5 rounded-full text-white mr-1"
+    style={{ background: '#dc2626', animation: 'lab-critical-pulse 1.2s infinite' }}>
+    🚨 حرج
+  </span>
+)
+
+// بيبني رابط واتساب مجاني (wa.me) برسالة جاهزة - من غير أي API مدفوع، بيفتح واتساب المتصفح/الموبايل عادي
+const buildWhatsAppLink = (phone, message) => {
+  if (!phone) return null
+  let clean = phone.replace(/[^\d]/g, '')
+  if (clean.startsWith('0')) clean = '2' + clean // 01012345678 -> 201012345678
+  else if (!clean.startsWith('2')) clean = '2' + clean
+  return 'https://wa.me/' + clean + '?text=' + encodeURIComponent(message)
+}
+
 const getBucket = (dateStr) => {
   const date = new Date(dateStr)
   const now = new Date()
@@ -73,6 +113,18 @@ const splitTests = (patient) => {
   return { singleTests, panelGroups }
 }
 
+// بيدوّر على أول تحليل حرج جوه بيانات المريض كله (مفرد أو باقة) عشان نعرض تنبيه في رأس بطاقة المريض
+const findCriticalTest = (patient) => {
+  const { singleTests, panelGroups } = splitTests(patient)
+  const critical = singleTests.find(t => checkCritical(t.name, t.value))
+  if (critical) return critical.name
+  for (const group of Object.values(panelGroups)) {
+    const item = group.items.find(i => checkCritical(i.name, i.value ?? i.absolute_value))
+    if (item) return item.name
+  }
+  return null
+}
+
 export default function Results() {
   const showToast = useToast()
   const [patients, setPatients] = useState([])
@@ -101,7 +153,7 @@ export default function Results() {
     setLoading(false)
   }
 
-  const updateTest = async (testId, value, status) => {
+  const updateTest = async (testId, value, status, testName) => {
     setSavingTestId(testId)
     const { error } = await supabase.from('tests').update({ value, status }).eq('id', testId)
     setSavingTestId(null)
@@ -109,7 +161,11 @@ export default function Results() {
       showToast('حدث خطأ أثناء حفظ النتيجة: ' + error.message, 'error')
       return
     }
-    showToast('تم حفظ النتيجة', 'success')
+    if (checkCritical(testName, value)) {
+      showToast('🚨 قيمة حرجة في "' + testName + '": ' + value + ' — لازم مراجعة فورية من الدكتور', 'error', 10000)
+    } else {
+      showToast('تم حفظ النتيجة', 'success')
+    }
     fetchPatients()
   }
 
@@ -212,6 +268,7 @@ export default function Results() {
 
   const finalizePanel = async (items) => {
     setFinalizingPanel(items[0]?.panel_instance_id)
+    let anyCritical = false
     for (const item of items) {
       const input = resultInput[item.id] || {}
       const relValue = input.relative_value ?? item.relative_value ?? ''
@@ -220,6 +277,7 @@ export default function Results() {
 
       if (item.result_type === 'relative_absolute') {
         const flag = calcFlag(absValue, item.absolute_range)
+        if (checkCritical(item.name, absValue)) anyCritical = true
         await supabase.from('tests').update({
           relative_value: relValue,
           absolute_value: absValue,
@@ -228,6 +286,7 @@ export default function Results() {
         }).eq('id', item.id)
       } else {
         const flag = calcFlag(singleValue, item.normal_range)
+        if (checkCritical(item.name, singleValue)) anyCritical = true
         await supabase.from('tests').update({
           value: singleValue,
           flag,
@@ -236,7 +295,32 @@ export default function Results() {
       }
     }
     setFinalizingPanel(null)
-    showToast('تم اعتماد نتائج الباقة بنجاح', 'success')
+    if (anyCritical) {
+      showToast('🚨 فيه قيمة حرجة جوه نتائج الباقة دي — راجعها فورًا قبل اعتماد التقرير', 'error', 10000)
+    } else {
+      showToast('تم اعتماد نتائج الباقة بنجاح', 'success')
+    }
+    fetchPatients()
+  }
+
+  const sendWhatsApp = (patient) => {
+    if (!patient.phone) {
+      showToast('مفيش رقم موبايل مسجّل للمريض ده', 'warning')
+      return
+    }
+    const message = 'أهلاً ' + patient.name + '، نتيجة التحليل بتاعتك جاهزة، تقدر تستلمها من المعمل في أي وقت 🙏'
+    const link = buildWhatsAppLink(patient.phone, message)
+    window.open(link, '_blank')
+  }
+
+  const togglePaid = async (patient) => {
+    const newPaid = !patient.paid
+    const { error } = await supabase.from('patients').update({ paid: newPaid }).eq('id', patient.id)
+    if (error) {
+      showToast('حدث خطأ أثناء تحديث حالة الدفع: ' + error.message, 'error')
+      return
+    }
+    showToast(newPaid ? 'تم تسجيل المريض كـ"مدفوع"' : 'تم تسجيل المريض كـ"غير مدفوع"', 'success')
     fetchPatients()
   }
 
@@ -454,8 +538,14 @@ export default function Results() {
           {filtered.map(p => {
             const { singleTests, panelGroups } = splitTests(p)
             const firstStatus = p.tests?.[0]?.status || 'تم التجميع'
+            const criticalTestName = findCriticalTest(p)
             return (
-              <div key={p.id} className="bg-white rounded-xl" style={{ border: '1px solid var(--outline-variant)' }}>
+              <div key={p.id} className="bg-white rounded-xl" style={{ border: criticalTestName ? '2px solid #dc2626' : '1px solid var(--outline-variant)' }}>
+                {criticalTestName && (
+                  <div className="px-4 py-2 text-xs font-bold text-white flex items-center gap-2" style={{ background: '#dc2626', borderRadius: '11px 11px 0 0' }}>
+                    🚨 قيمة حرجة في "{criticalTestName}" — يحتاج مراجعة فورية
+                  </div>
+                )}
                 <div className="flex items-center justify-between p-4"
                   style={{ borderBottom: selected?.id === p.id ? '1px solid var(--outline-variant)' : 'none' }}>
                   <div
@@ -476,11 +566,21 @@ export default function Results() {
                       {p.age} سنة • {p.doctor} • {p.tests?.length} بند
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
                     <span className="text-xs font-medium px-2 py-1 rounded-full"
                       style={{ background: statusStyle[firstStatus]?.bg || '#fef3c7', color: statusStyle[firstStatus]?.color || '#92400e' }}>
                       {firstStatus}
                     </span>
+                    <button onClick={e => { e.stopPropagation(); togglePaid(p) }}
+                      className="px-3 py-1 rounded-lg text-xs font-medium"
+                      style={p.paid ? { background: '#d1fae5', color: '#065f46' } : { background: '#fee2e2', color: '#991b1b' }}>
+                      {p.paid ? '✅ مدفوع' : '⏳ غير مدفوع'}
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); sendWhatsApp(p) }}
+                      className="px-3 py-1 rounded-lg text-xs font-medium"
+                      style={{ background: '#d1fae5', color: '#065f46' }}>
+                      📤 واتساب
+                    </button>
                     <button onClick={e => { e.stopPropagation(); setBarcodePatient(p) }}
                       className="px-3 py-1 rounded-lg text-xs font-medium"
                       style={{ background: '#fef3c7', color: '#92400e' }}>
@@ -537,9 +637,11 @@ export default function Results() {
                                       const relInput = resultInput[item.id]?.relative_value ?? item.relative_value ?? ''
                                       const absInput = resultInput[item.id]?.absolute_value ?? item.absolute_value ?? ''
                                       const singleInput = resultInput[item.id]?.value ?? item.value ?? ''
+                                      const itemCritical = checkCritical(item.name, isDiff ? absInput : singleInput)
                                       return (
                                         <tr key={item.id} style={{ borderTop: '1px solid var(--outline-variant)' }}>
                                           <td className="p-2 text-sm font-medium" style={{ width: '25%', color: 'var(--on-surface)' }}>
+                                            {itemCritical && <CriticalBadge />}
                                             {item.name}
                                             {item.flag && (
                                               <span className="mr-1 text-xs font-bold" style={{ color: item.flag === 'H' ? '#dc2626' : '#2563eb' }}>
@@ -630,59 +732,64 @@ export default function Results() {
                           </tr>
                         </thead>
                         <tbody>
-                          {singleTests.map(t => (
-                            <tr key={t.id} style={{ borderTop: '1px solid var(--outline-variant)' }}>
-                              <td className="p-3 text-sm font-medium" style={{ color: 'var(--on-surface)' }}>
-                                {t.name}
-                                {t.unit && <span className="text-xs mr-1" style={{ color: 'var(--on-surface-variant)' }}>({t.unit})</span>}
-                              </td>
-                              <td className="p-3 text-xs" style={{ color: 'var(--on-surface-variant)' }}>{t.normal_range || '-'}</td>
-                              <td className="p-3">
-                                <input type="text" defaultValue={t.value || ''}
-                                  onChange={e => setResultInput(prev => ({ ...prev, [t.id]: { ...prev[t.id], value: e.target.value } }))}
-                                  placeholder="أدخل النتيجة..."
-                                  className="px-3 py-1 rounded-lg outline-none text-right w-full"
-                                  style={{ border: '1px solid var(--outline-variant)', fontSize: '13px' }}
-                                />
-                              </td>
-                              <td className="p-3">
-                                <select defaultValue={t.status || 'تم التجميع'}
-                                  onChange={e => setResultInput(prev => ({ ...prev, [t.id]: { ...prev[t.id], stage: e.target.value } }))}
-                                  className="px-2 py-1 rounded-lg outline-none text-right text-xs font-medium"
-                                  style={{
-                                    background: statusStyle[t.status]?.bg || statusStyle['تم التجميع'].bg,
-                                    color: statusStyle[t.status]?.color || statusStyle['تم التجميع'].color,
-                                    border: '1px solid var(--outline-variant)'
-                                  }}>
-                                  {SAMPLE_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                                </select>
-                              </td>
-                              <td className="p-3">
-                                <div className="flex gap-1">
-                                  <button onClick={() => {
-                                    const value = resultInput[t.id]?.value ?? t.value ?? ''
-                                    const manualStage = resultInput[t.id]?.stage ?? t.status ?? 'تم التجميع'
-                                    const status = value.trim() !== '' ? 'معتمد' : (manualStage === 'معتمد' ? 'قيد التحليل' : manualStage)
-                                    updateTest(t.id, value, status)
-                                  }} disabled={savingTestId === t.id}
-                                    className="px-3 py-1 rounded-lg text-xs text-white font-medium"
-                                    style={{ background: 'var(--primary-container)', opacity: savingTestId === t.id ? 0.7 : 1 }}>
-                                    {savingTestId === t.id ? '...' : 'حفظ'}
-                                  </button>
-                                  <button onClick={() => setEditTest(t)}
-                                    className="px-3 py-1 rounded-lg text-xs font-medium"
-                                    style={{ background: '#e8f0fe', color: 'var(--primary-container)' }}>
-                                    ✏️
-                                  </button>
-                                  <button onClick={() => setDeleteTestConfirm(t)}
-                                    className="px-3 py-1 rounded-lg text-xs font-medium"
-                                    style={{ background: '#fee2e2', color: '#dc2626' }}>
-                                    🗑️
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                          {singleTests.map(t => {
+                            const currentValue = resultInput[t.id]?.value ?? t.value ?? ''
+                            const isCritical = checkCritical(t.name, currentValue)
+                            return (
+                              <tr key={t.id} style={{ borderTop: '1px solid var(--outline-variant)' }}>
+                                <td className="p-3 text-sm font-medium" style={{ color: 'var(--on-surface)' }}>
+                                  {isCritical && <CriticalBadge />}
+                                  {t.name}
+                                  {t.unit && <span className="text-xs mr-1" style={{ color: 'var(--on-surface-variant)' }}>({t.unit})</span>}
+                                </td>
+                                <td className="p-3 text-xs" style={{ color: 'var(--on-surface-variant)' }}>{t.normal_range || '-'}</td>
+                                <td className="p-3">
+                                  <input type="text" defaultValue={t.value || ''}
+                                    onChange={e => setResultInput(prev => ({ ...prev, [t.id]: { ...prev[t.id], value: e.target.value } }))}
+                                    placeholder="أدخل النتيجة..."
+                                    className="px-3 py-1 rounded-lg outline-none text-right w-full"
+                                    style={{ border: isCritical ? '1.5px solid #dc2626' : '1px solid var(--outline-variant)', fontSize: '13px' }}
+                                  />
+                                </td>
+                                <td className="p-3">
+                                  <select defaultValue={t.status || 'تم التجميع'}
+                                    onChange={e => setResultInput(prev => ({ ...prev, [t.id]: { ...prev[t.id], stage: e.target.value } }))}
+                                    className="px-2 py-1 rounded-lg outline-none text-right text-xs font-medium"
+                                    style={{
+                                      background: statusStyle[t.status]?.bg || statusStyle['تم التجميع'].bg,
+                                      color: statusStyle[t.status]?.color || statusStyle['تم التجميع'].color,
+                                      border: '1px solid var(--outline-variant)'
+                                    }}>
+                                    {SAMPLE_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                                  </select>
+                                </td>
+                                <td className="p-3">
+                                  <div className="flex gap-1">
+                                    <button onClick={() => {
+                                      const value = resultInput[t.id]?.value ?? t.value ?? ''
+                                      const manualStage = resultInput[t.id]?.stage ?? t.status ?? 'تم التجميع'
+                                      const status = value.trim() !== '' ? 'معتمد' : (manualStage === 'معتمد' ? 'قيد التحليل' : manualStage)
+                                      updateTest(t.id, value, status, t.name)
+                                    }} disabled={savingTestId === t.id}
+                                      className="px-3 py-1 rounded-lg text-xs text-white font-medium"
+                                      style={{ background: 'var(--primary-container)', opacity: savingTestId === t.id ? 0.7 : 1 }}>
+                                      {savingTestId === t.id ? '...' : 'حفظ'}
+                                    </button>
+                                    <button onClick={() => setEditTest(t)}
+                                      className="px-3 py-1 rounded-lg text-xs font-medium"
+                                      style={{ background: '#e8f0fe', color: 'var(--primary-container)' }}>
+                                      ✏️
+                                    </button>
+                                    <button onClick={() => setDeleteTestConfirm(t)}
+                                      className="px-3 py-1 rounded-lg text-xs font-medium"
+                                      style={{ background: '#fee2e2', color: '#dc2626' }}>
+                                      🗑️
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     )}
@@ -697,8 +804,11 @@ export default function Results() {
         @keyframes lab-results-spin {
           to { transform: rotate(360deg); }
         }
+        @keyframes lab-critical-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
       `}</style>
     </div>
   )
 }
-

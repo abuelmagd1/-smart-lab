@@ -1,5 +1,4 @@
 @import "tailwindcss";
-
 :root {
   --primary: #005bbf;
   --primary-container: #1a73e8;
@@ -13,16 +12,30 @@
   --font-display: 'Plus Jakarta Sans', sans-serif;
   --font-body: 'Tajawal', sans-serif;
 }
-
+.dark {
+  --primary: #4dabf7;
+  --primary-container: #3b82f6;
+  --surface: #121417;
+  --surface-container: #1e2124;
+  --on-surface: #e8eaed;
+  --on-surface-variant: #9aa0a6;
+  --outline: #5f6368;
+  --outline-variant: #3c4043;
+  --error: #f87171;
+}
+/* أغلب بطاقات النظام بتستخدم كلاس bg-white من Tailwind - السطر ده بيلوّنها كلها تلقائيًا في الوضع الليلي
+   من غير ما نحتاج نلمس أي ملف صفحة أو كومبوننت على حدة */
+.dark .bg-white {
+  background-color: var(--surface-container) !important;
+}
 * {
   font-family: var(--font-body);
 }
-
 h1, h2, h3, h4 {
   font-family: var(--font-display);
 }
-
 body {
   background-color: var(--surface);
   color: var(--on-surface);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
