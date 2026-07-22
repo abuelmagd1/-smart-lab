@@ -6,6 +6,8 @@ import { getBarcodeCode } from '../components/BarcodeLabel'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import { useToast } from '../components/Toast'
+import html2canvas from 'html2canvas'
+import jsPDF from 'jspdf'
 
 const resultColor = {
   'طبيعي': { color: '#065f46', bg: '#d1fae5' },
@@ -43,6 +45,15 @@ const HISTORY_COLUMNS = [
   { key: 'MCHC', label: 'MCHC' },
   { key: 'Platelet Count', label: 'PLT' },
 ]
+
+// بيبني رابط واتساب مجاني (wa.me) - من غير أي API مدفوع
+const buildWhatsAppLink = (phone, message) => {
+  if (!phone) return null
+  let clean = phone.replace(/[^\d]/g, '')
+  if (clean.startsWith('0')) clean = '2' + clean // 01012345678 -> 201012345678
+  else if (!clean.startsWith('2')) clean = '2' + clean
+  return 'https://wa.me/' + clean + '?text=' + encodeURIComponent(message)
+}
 
 const getBucket = (dateStr) => {
   const date = new Date(dateStr)
@@ -108,6 +119,7 @@ export default function Reports() {
   })
   const [savingDesign, setSavingDesign] = useState(false)
   const [designSaved, setDesignSaved] = useState(false)
+  const [sharingReport, setSharingReport] = useState(false)
   const previewRef = useRef(null)
   const printFrameRef = useRef(null)
 
@@ -348,6 +360,74 @@ export default function Reports() {
   const savePreferredPrinter = (name) => {
     setPreferredPrinter(name)
     try { localStorage.setItem('reportPrinterName', name) } catch { /* ignore */ }
+  }
+
+  // بيحوّل معاينة التقرير لملف PDF حقيقي (مش صورة)، وبيستخدم قائمة المشاركة بتاعة النظام (Web Share API)
+  // عشان تفتح واتساب بالملف مرفق تلقائيًا. لو المتصفح مش بيدعم المشاركة دي، بينزّل الـ PDF ويفتح واتساب برسالة بديلة.
+  const shareReportViaWhatsApp = async () => {
+    if (!selectedPatient || !previewRef.current) return
+    setSharingReport(true)
+    try {
+      const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: '#ffffff', useCORS: true })
+      const imgData = canvas.toDataURL('image/png')
+
+      // بنحط الصورة جوه صفحات A4، ولو التقرير طويل بنقسّمه على أكتر من صفحة تلقائيًا
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const imgWidth = pageWidth
+      const imgHeight = (canvas.height * imgWidth) / canvas.width
+
+      let heightLeft = imgHeight
+      let position = 0
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight
+        pdf.addPage()
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+        heightLeft -= pageHeight
+      }
+
+      const pdfBlob = pdf.output('blob')
+      const fileName = 'تقرير-' + selectedPatient.name + '.pdf'
+      const file = new File([pdfBlob], fileName, { type: 'application/pdf' })
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'تقرير التحليل',
+            text: 'تقرير تحليل ' + selectedPatient.name,
+          })
+        } catch (shareErr) {
+          if (shareErr.name !== 'AbortError') {
+            showToast('حصل خطأ أثناء المشاركة: ' + shareErr.message, 'error')
+          }
+        }
+      } else {
+        // بديل لو المتصفح مش بيدعم مشاركة الملفات: ننزّل الـ PDF، ونفتح واتساب برسالة نصية،
+        // والمستخدم يرفق الملف يدويًا من المرفقات (مفيش أي API مدفوع بيسمح بإرفاق تلقائي بديل)
+        const url = URL.createObjectURL(pdfBlob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = fileName
+        a.click()
+        URL.revokeObjectURL(url)
+        showToast('📥 اتحمل ملف PDF بالتقرير. المتصفح ده مش بيدعم المشاركة المباشرة، فهيفتحلك واتساب وترفق الملف يدويًا من المرفقات', 'info', 8000)
+
+        if (selectedPatient.phone) {
+          const message = 'أهلاً ' + selectedPatient.name + '، ده تقرير نتيجة التحليل بتاعتك 🙏'
+          const link = buildWhatsAppLink(selectedPatient.phone, message)
+          setTimeout(() => window.open(link, '_blank'), 1200)
+        }
+      }
+    } catch (err) {
+      showToast('حصل خطأ أثناء تجهيز التقرير: ' + err.message, 'error')
+    } finally {
+      setSharingReport(false)
+    }
   }
 
   const printReport = () => {
@@ -957,6 +1037,18 @@ export default function Reports() {
               className="w-full py-2 rounded-lg text-xs font-medium text-white mt-2"
               style={{ background: '#1a2456' }}>
               🖨️ طباعة التقرير
+            </button>
+
+            <button onClick={shareReportViaWhatsApp} disabled={sharingReport}
+              className="w-full py-2 rounded-lg text-xs font-medium text-white mt-2 flex items-center justify-center gap-2"
+              style={{ background: '#25D366', opacity: sharingReport ? 0.7 : 1 }}>
+              {sharingReport && (
+                <span className="animate-spin" style={{
+                  width: '11px', height: '11px', border: '2px solid rgba(255,255,255,0.4)',
+                  borderTopColor: 'white', borderRadius: '50%', display: 'inline-block',
+                }} />
+              )}
+              {sharingReport ? 'جاري التجهيز...' : '📤 مشاركة عبر واتساب'}
             </button>
 
             <button onClick={() => setSelectedPatient(null)}
