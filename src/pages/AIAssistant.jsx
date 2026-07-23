@@ -151,6 +151,67 @@ const pcmBase64ToWavBlob = (base64Pcm, sampleRate, numChannels, bitDepth) => {
   return new Blob([buffer], { type: 'audio/wav' })
 }
 
+// بيحوّل AudioBuffer (بعد فك أي صيغة صوت زي webm/opus) لملف WAV خام - صيغة مقبولة عند Gemini
+const audioBufferToWavBlob = (audioBuffer) => {
+  const numChannels = audioBuffer.numberOfChannels
+  const sampleRate = audioBuffer.sampleRate
+  const bitDepth = 16
+
+  let interleaved
+  if (numChannels === 2) {
+    const left = audioBuffer.getChannelData(0)
+    const right = audioBuffer.getChannelData(1)
+    interleaved = new Float32Array(left.length * 2)
+    for (let i = 0, j = 0; i < left.length; i++, j += 2) {
+      interleaved[j] = left[i]
+      interleaved[j + 1] = right[i]
+    }
+  } else {
+    interleaved = audioBuffer.getChannelData(0)
+  }
+
+  const dataSize = interleaved.length * (bitDepth / 8)
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+  const writeStr = function (offset, str) { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)) }
+
+  const blockAlign = numChannels * (bitDepth / 8)
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, numChannels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * blockAlign, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, bitDepth, true)
+  writeStr(36, 'data')
+  view.setUint32(40, dataSize, true)
+
+  let offset = 44
+  for (let i = 0; i < interleaved.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, interleaved[i]))
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' })
+}
+
+// بيحوّل أي تسجيل صوتي (زي webm/opus من المتصفح) لملف WAV - عشان Gemini مش بيقبل صيغة webm خالص
+const convertRecordingToWav = async (audioBlob) => {
+  const arrayBuffer = await audioBlob.arrayBuffer()
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext
+  const audioCtx = new AudioContextClass()
+  try {
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+    return audioBufferToWavBlob(audioBuffer)
+  } finally {
+    audioCtx.close()
+  }
+}
+
 const resolvePatient = (patients, name, age) => {
   const target = (name || '').trim()
   if (!target) return { notFound: true }
@@ -950,7 +1011,7 @@ export default function AIAssistant() {
         setRecordingSeconds(0)
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
         audioChunksRef.current = []
-        await transcribeAudio(audioBlob, mimeType)
+        await transcribeAudio(audioBlob)
       }
       mediaRecorderRef.current = recorder
       recorder.start()
@@ -976,10 +1037,11 @@ export default function AIAssistant() {
     if (recordingIntervalRef.current) { clearInterval(recordingIntervalRef.current); recordingIntervalRef.current = null }
   }
 
-  const transcribeAudio = async (audioBlob, mimeType) => {
+  const transcribeAudio = async (audioBlob) => {
     setLoading(true)
     try {
-      const base64Audio = await blobToBase64(audioBlob)
+      const wavBlob = await convertRecordingToWav(audioBlob)
+      const base64Audio = await blobToBase64(wavBlob)
 
       const res = await callGeminiProxyWithRetry(INTERACTIONS_PATH, {
         model: TEXT_MODEL,
@@ -988,7 +1050,7 @@ export default function AIAssistant() {
             type: 'user_input',
             content: [
               { type: 'text', text: 'انسخ الكلام في التسجيل الصوتي ده حرفيًا كنص (عربي أو إنجليزي)، من غير أي تعليق أو شرح إضافي، النص بس.' },
-              { type: 'audio', data: base64Audio, mime_type: mimeType }
+              { type: 'audio', data: base64Audio, mime_type: 'audio/wav' }
             ]
           }
         ],
