@@ -3,13 +3,14 @@ import { useNavigate, useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useToast } from '../components/Toast'
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY
+// المفتاح اتشال من هنا خالص - بقى محفوظ سيرفر-سايد بس جوه Supabase Edge Function (gemini-proxy)
+// عشان محدش يقدر يشوفه من المتصفح تاني
 
 const TEXT_MODEL = 'gemini-3.5-flash'
-const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1/interactions'
+const INTERACTIONS_PATH = '/v1/interactions'
 
 const TTS_MODEL = 'gemini-3.1-flash-tts-preview'
-const GENERATE_CONTENT_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + TTS_MODEL + ':generateContent'
+const GENERATE_CONTENT_PATH = '/v1beta/models/' + TTS_MODEL + ':generateContent'
 
 const renderMarkdown = (text) => {
   if (!text) return ''
@@ -80,6 +81,32 @@ const safeJson = async (response) => {
     return await response.json()
   } catch {
     throw new Error('استجابة غير صالحة من الخادم')
+  }
+}
+
+// بيكلم Supabase Edge Function (gemini-proxy) بدل ما يكلم Gemini مباشرة - المفتاح بقى محفوظ سيرفر-سايد بس
+const callGeminiProxy = async (path, body, signal, timeoutMs) => {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new Error('لازم تسجّل دخول عشان تستخدم المساعد الذكي')
+
+  const proxyUrl = supabase.supabaseUrl + '/functions/v1/gemini-proxy'
+  return fetchWithTimeout(proxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+    signal: signal,
+    body: JSON.stringify({ path: path, body: body }),
+  }, timeoutMs || 35000)
+}
+
+const callGeminiProxyWithRetry = async (path, body, signal, timeoutMs, retries) => {
+  try {
+    return await callGeminiProxy(path, body, signal, timeoutMs)
+  } catch (err) {
+    if (retries > 0 && err.name !== 'AbortError' && err.name !== 'TimeoutError') {
+      await new Promise(function (r) { setTimeout(r, 1000) })
+      return callGeminiProxyWithRetry(path, body, signal, timeoutMs, retries - 1)
+    }
+    throw err
   }
 }
 
@@ -571,11 +598,14 @@ export default function AIAssistant() {
     }
     if (historyRef.current.previousId) body.previous_interaction_id = historyRef.current.previousId
 
-    const response = await fetch(INTERACTIONS_URL + '?alt=sse', {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error('لازم تسجّل دخول عشان تستخدم المساعد الذكي')
+
+    const response = await fetch(supabase.supabaseUrl + '/functions/v1/gemini-proxy', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
       signal: signal,
-      body: JSON.stringify(body)
+      body: JSON.stringify({ path: INTERACTIONS_PATH + '?alt=sse', body: body })
     })
 
     if (!response.ok || !response.body) {
@@ -815,17 +845,12 @@ export default function AIAssistant() {
     if (name === 'search_medical_info') {
       try {
         showStatus('🔎 بيبحث في الإنترنت...')
-        const res = await fetchWithRetry(INTERACTIONS_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-          signal: signal,
-          body: JSON.stringify({
-            model: TEXT_MODEL,
-            input: 'ابحث وجاوب بعربي بسيط بدون جداول أو Markdown: ' + (args.query || ''),
-            tools: [{ type: 'google_search' }],
-            generation_config: { thinking_level: 'low' }
-          })
-        }, 45000, 1)
+        const res = await callGeminiProxyWithRetry(INTERACTIONS_PATH, {
+          model: TEXT_MODEL,
+          input: 'ابحث وجاوب بعربي بسيط بدون جداول أو Markdown: ' + (args.query || ''),
+          tools: [{ type: 'google_search' }],
+          generation_config: { thinking_level: 'low' }
+        }, signal, 45000, 1)
         const data = await safeJson(res)
         const steps = data.steps || []
         let textOut = ''
@@ -956,23 +981,19 @@ export default function AIAssistant() {
     try {
       const base64Audio = await blobToBase64(audioBlob)
 
-      const res = await fetchWithRetry(INTERACTIONS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify({
-          model: TEXT_MODEL,
-          input: [
-            {
-              type: 'user_input',
-              content: [
-                { type: 'text', text: 'انسخ الكلام في التسجيل الصوتي ده حرفيًا كنص (عربي أو إنجليزي)، من غير أي تعليق أو شرح إضافي، النص بس.' },
-                { type: 'audio', data: base64Audio, mime_type: mimeType }
-              ]
-            }
-          ],
-          generation_config: { thinking_level: 'low' }
-        })
-      }, 25000, 1)
+      const res = await callGeminiProxyWithRetry(INTERACTIONS_PATH, {
+        model: TEXT_MODEL,
+        input: [
+          {
+            type: 'user_input',
+            content: [
+              { type: 'text', text: 'انسخ الكلام في التسجيل الصوتي ده حرفيًا كنص (عربي أو إنجليزي)، من غير أي تعليق أو شرح إضافي، النص بس.' },
+              { type: 'audio', data: base64Audio, mime_type: mimeType }
+            ]
+          }
+        ],
+        generation_config: { thinking_level: 'low' }
+      }, undefined, 25000, 1)
 
       if (!res.ok) {
         const errData = await safeJson(res).catch(function () { return {} })
@@ -1042,17 +1063,13 @@ export default function AIAssistant() {
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]
       try {
-        const res = await fetchWithTimeout(GENERATE_CONTENT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: chunk }] }],
-            generationConfig: {
-              responseModalities: ['AUDIO'],
-              speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }
-            }
-          })
-        }, 15000)
+        const res = await callGeminiProxy(GENERATE_CONTENT_PATH, {
+          contents: [{ parts: [{ text: chunk }] }],
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }
+          }
+        }, undefined, 15000)
 
         if (!res.ok) continue
 
