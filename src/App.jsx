@@ -22,6 +22,7 @@ const AdminNotifications = lazy(() => import('./pages/admin/AdminNotifications')
 function App() {
   const [session, setSession] = useState(undefined)
   const [role, setRole] = useState(null)
+  const [subscriptionStatus, setSubscriptionStatus] = useState(undefined) // undefined = لسه بنتأكد، null = مفيش تاريخ انتهاء (مفتوح)، Date = تاريخ الانتهاء
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -31,7 +32,7 @@ function App() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session) fetchRole(session.user.id)
-      else setRole(null)
+      else { setRole(null); setSubscriptionStatus(undefined) }
     })
     return () => listener.subscription.unsubscribe()
   }, [])
@@ -41,8 +42,22 @@ function App() {
     if (error) {
       console.error('فشل جلب صلاحية المستخدم:', error)
     }
-    setRole(data?.role || 'doctor')
+    const userRole = data?.role || 'doctor'
+    setRole(userRole)
+
+    if (userRole === 'doctor') {
+      checkSubscription(userId)
+    } else {
+      setSubscriptionStatus(null)
+    }
   }
+
+  const checkSubscription = async (userId) => {
+    const { data } = await supabase.from('lab_settings').select('subscription_expires_at').eq('user_id', userId).maybeSingle()
+    setSubscriptionStatus(data?.subscription_expires_at ? new Date(data.subscription_expires_at) : null)
+  }
+
+  const isSubscriptionExpired = role === 'doctor' && subscriptionStatus instanceof Date && subscriptionStatus.getTime() < Date.now()
 
   if (session === undefined) {
     return (
@@ -52,10 +67,29 @@ function App() {
     )
   }
 
-  if (session && role === null) {
+  if (session && (role === null || subscriptionStatus === undefined)) {
     return (
       <div className="min-h-screen flex items-center justify-center" dir="rtl">
         <div className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>جارٍ تجهيز الحساب...</div>
+      </div>
+    )
+  }
+
+  if (session && isSubscriptionExpired) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6" dir="rtl">
+        <div className="bg-white rounded-2xl p-8 w-full max-w-md text-center" style={{ border: '1px solid var(--outline-variant)' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏰</div>
+          <h1 className="text-lg font-bold mb-2" style={{ color: 'var(--on-surface)' }}>انتهى اشتراكك</h1>
+          <p className="text-sm mb-6" style={{ color: 'var(--on-surface-variant)' }}>
+            اشتراكك في النظام انتهى بتاريخ {subscriptionStatus.toLocaleDateString('ar-EG')}. بياناتك محفوظة وآمنة، تواصل مع الدعم الفني لتجديد الاشتراك.
+          </p>
+          <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/login' }}
+            className="px-5 py-2.5 rounded-lg text-sm font-medium text-white"
+            style={{ background: 'var(--primary-container)' }}>
+            تسجيل الخروج
+          </button>
+        </div>
       </div>
     )
   }
@@ -80,7 +114,7 @@ function App() {
                 <Route path="/statistics" element={<Statistics />} />
               </Route>
 
-              <Route element={session && role === 'admin' ? <AdminLayout /> : <Navigate to="/login" />}>
+              <Route element={session && role === 'admin' ? <AdminLayout /> :<Navigate to="/login" />}>
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/add-lab" element={<AddLab />} />
                 <Route path="/admin/notifications" element={<AdminNotifications />} />

@@ -16,6 +16,7 @@ export default function AddLab() {
     address: '',
     phone: '',
     qualification: '',
+    subscriptionMonths: '1',
   })
 
   const compressImage = (file, maxSize = 300, quality = 0.75) => {
@@ -52,7 +53,7 @@ export default function AddLab() {
   }
 
   const resetForm = () => {
-    setForm({ email: '', password: '', ownerName: '', doctorName: '', labName: '', address: '', phone: '', qualification: '' })
+    setForm({ email: '', password: '', ownerName: '', doctorName: '', labName: '', address: '', phone: '', qualification: '', subscriptionMonths: '1' })
     setLogoFile(null)
     setLogoPreview(null)
   }
@@ -113,6 +114,9 @@ export default function AddLab() {
       }
 
       // 4. إضافة بيانات المعمل في lab_settings - لازم نتأكد إنها نجحت فعلًا
+      const expiryDate = new Date()
+      expiryDate.setMonth(expiryDate.getMonth() + parseInt(form.subscriptionMonths))
+
       const { error: settingsError } = await supabase.from('lab_settings').insert([{
         user_id: newUserId,
         owner_name: form.ownerName,
@@ -123,6 +127,7 @@ export default function AddLab() {
         email: form.email,
         qualification: form.qualification,
         logo_url: logoUrl,
+        subscription_expires_at: expiryDate.toISOString(),
       }])
       if (settingsError) {
         throw new Error('اتعمل الحساب لكن فشل حفظ بيانات المعمل: ' + settingsError.message)
@@ -228,6 +233,31 @@ export default function AddLab() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* مدة الاشتراك */}
+        <div style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '1.5rem' }}>
+          <h2 className="font-semibold mb-4" style={{ color: 'var(--on-surface)' }}>💳 مدة الاشتراك</h2>
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { val: '1', label: 'شهر واحد' },
+              { val: '3', label: '3 شهور' },
+              { val: '6', label: '6 شهور' },
+              { val: '12', label: 'سنة كاملة' },
+            ].map(opt => (
+              <button key={opt.val} type="button" onClick={() => setForm(p => ({ ...p, subscriptionMonths: opt.val }))}
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                style={{
+                  background: form.subscriptionMonths === opt.val ? '#1a2456' : '#f1f3f4',
+                  color: form.subscriptionMonths === opt.val ? 'white' : 'var(--on-surface-variant)',
+                }}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs mt-2" style={{ color: 'var(--on-surface-variant)' }}>
+            هيبدأ الاشتراك من دلوقتي وينتهي بعد المدة دي، وتقدر تجدده لاحقًا من لوحة تحكم الأدمن.
+          </p>
         </div>
 
         <div className="flex gap-3 justify-end" style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '1.5rem' }}>
