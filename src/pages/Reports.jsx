@@ -584,34 +584,21 @@ export default function Reports() {
 
       const pdfBlob = pdf.output('blob')
       const fileName = 'تقرير-' + selectedPatient.name + '.pdf'
-      const file = new File([pdfBlob], fileName, { type: 'application/pdf' })
 
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: 'تقرير التحليل',
-            text: 'تقرير تحليل ' + selectedPatient.name,
-          })
-          showToast('✅ اتفتحت قائمة المشاركة، اختر واتساب وابعت الملف', 'success', 4000)
-        } catch (shareErr) {
-          if (shareErr.name !== 'AbortError') {
-            showToast('حصل خطأ أثناء المشاركة: ' + shareErr.message, 'error', 5000)
-          }
-        }
-      } else {
-        const url = URL.createObjectURL(pdfBlob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = fileName
-        a.click()
-        URL.revokeObjectURL(url)
-        showToast('📥 اتحمل ملف PDF بالتقرير. المتصفح ده مش بيدعم المشاركة المباشرة، فهيفتحلك واتساب وترفق الملف يدويًا من المرفقات', 'info', 8000)
+      // بننزّل ملف الـ PDF على الجهاز، وفي نفس الوقت بنفتح شات واتساب مباشرة مع المريض
+      // (زي الفتح المباشر لواتساب في زرار "واتساب" بتاع صفحة النتائج بالظبط)
+      // من غير ما نمرّ على قائمة مشاركة النظام (اللي بتبقى واجهة عامة وزرار النسخ فيها مش دايمًا شغال)
+      const url = URL.createObjectURL(pdfBlob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      a.click()
+      URL.revokeObjectURL(url)
+      showToast('📥 اتحمل ملف PDF بالتقرير، وهيتفتحلك شات واتساب مع المريض — ترفق الملف يدويًا من المرفقات', 'info', 8000)
 
-        const message = 'أهلاً ' + selectedPatient.name + '، ده تقرير نتيجة التحليل بتاعتك 🙏'
-        const link = buildWhatsAppLink(selectedPatient.phone, message)
-        setTimeout(() => window.open(link, '_blank'), 1200)
-      }
+      const message = 'أهلاً ' + selectedPatient.name + '، ده تقرير نتيجة التحليل بتاعتك 🙏'
+      const link = buildWhatsAppLink(selectedPatient.phone, message)
+      setTimeout(() => window.open(link, '_blank'), 1200)
     } catch (err) {
       showToast('حصل خطأ أثناء تجهيز ملف الـ PDF: ' + err.message, 'error', 5000)
     } finally {
