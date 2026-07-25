@@ -122,6 +122,7 @@ export default function Reports() {
   const [sharingReport, setSharingReport] = useState(false)
   const previewRef = useRef(null)
   const printFrameRef = useRef(null)
+  const pdfContentRef = useRef(null)
 
   useEffect(() => { fetchPatients(); fetchSettings() }, [])
 
@@ -142,10 +143,13 @@ export default function Reports() {
   }, [selectedPatient])
 
   const fetchPatients = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('patients')
       .select('*, tests(*)')
       .order('created_at', { ascending: false })
+    if (error) {
+      showToast('حصل خطأ أثناء تحميل قائمة المرضى: ' + error.message, 'error', 5000)
+    }
     setPatients(data || [])
     setLoading(false)
   }
@@ -153,7 +157,10 @@ export default function Reports() {
   const fetchSettings = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const { data } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).maybeSingle()
+    const { data, error } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).maybeSingle()
+    if (error) {
+      showToast('حصل خطأ أثناء تحميل إعدادات المعمل: ' + error.message, 'error', 5000)
+    }
     if (data) {
       setSettings(data)
       setDesign({
@@ -196,10 +203,18 @@ export default function Reports() {
   const saveDesign = async () => {
     setSavingDesign(true)
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setSavingDesign(false); return }
-    await supabase.from('lab_settings').upsert({ user_id: user.id, ...design }, { onConflict: 'user_id' })
-    setSettings(prev => ({ ...prev, ...design }))
+    if (!user) {
+      setSavingDesign(false)
+      showToast('لازم تسجّل الدخول الأول عشان تحفظ التصميم', 'warning', 4000)
+      return
+    }
+    const { error } = await supabase.from('lab_settings').upsert({ user_id: user.id, ...design }, { onConflict: 'user_id' })
     setSavingDesign(false)
+    if (error) {
+      showToast('حصل خطأ أثناء حفظ التصميم: ' + error.message, 'error', 5000)
+      return
+    }
+    setSettings(prev => ({ ...prev, ...design }))
     setDesignSaved(true)
     setTimeout(() => setDesignSaved(false), 2000)
   }
@@ -362,84 +377,10 @@ export default function Reports() {
     try { localStorage.setItem('reportPrinterName', name) } catch { /* ignore */ }
   }
 
-  // بيحوّل معاينة التقرير لملف PDF حقيقي (مش صورة)، وبيستخدم قائمة المشاركة بتاعة النظام (Web Share API)
-  // عشان تفتح واتساب بالملف مرفق تلقائيًا. لو المتصفح مش بيدعم المشاركة دي، بينزّل الـ PDF ويفتح واتساب برسالة بديلة.
-  const shareReportViaWhatsApp = async () => {
-    if (!selectedPatient || !previewRef.current) return
-    setSharingReport(true)
-    try {
-      const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: '#ffffff', useCORS: true })
-      const imgData = canvas.toDataURL('image/png')
-
-      // بنحط الصورة جوه صفحات A4، ولو التقرير طويل بنقسّمه على أكتر من صفحة تلقائيًا
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
-      const pageWidth = pdf.internal.pageSize.getWidth()
-      const pageHeight = pdf.internal.pageSize.getHeight()
-      const imgWidth = pageWidth
-      const imgHeight = (canvas.height * imgWidth) / canvas.width
-
-      let heightLeft = imgHeight
-      let position = 0
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-      heightLeft -= pageHeight
-
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight
-        pdf.addPage()
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-        heightLeft -= pageHeight
-      }
-
-      const pdfBlob = pdf.output('blob')
-      const fileName = 'تقرير-' + selectedPatient.name + '.pdf'
-      const file = new File([pdfBlob], fileName, { type: 'application/pdf' })
-
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: 'تقرير التحليل',
-            text: 'تقرير تحليل ' + selectedPatient.name,
-          })
-        } catch (shareErr) {
-          if (shareErr.name !== 'AbortError') {
-            showToast('حصل خطأ أثناء المشاركة: ' + shareErr.message, 'error')
-          }
-        }
-      } else {
-        // بديل لو المتصفح مش بيدعم مشاركة الملفات: ننزّل الـ PDF، ونفتح واتساب برسالة نصية،
-        // والمستخدم يرفق الملف يدويًا من المرفقات (مفيش أي API مدفوع بيسمح بإرفاق تلقائي بديل)
-        const url = URL.createObjectURL(pdfBlob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = fileName
-        a.click()
-        URL.revokeObjectURL(url)
-        showToast('📥 اتحمل ملف PDF بالتقرير. المتصفح ده مش بيدعم المشاركة المباشرة، فهيفتحلك واتساب وترفق الملف يدويًا من المرفقات', 'info', 8000)
-
-        if (selectedPatient.phone) {
-          const message = 'أهلاً ' + selectedPatient.name + '، ده تقرير نتيجة التحليل بتاعتك 🙏'
-          const link = buildWhatsAppLink(selectedPatient.phone, message)
-          setTimeout(() => window.open(link, '_blank'), 1200)
-        }
-      }
-    } catch (err) {
-      showToast('حصل خطأ أثناء تجهيز التقرير: ' + err.message, 'error')
-    } finally {
-      setSharingReport(false)
-    }
-  }
-
-  const printReport = () => {
-    if (!selectedPatient) return
-
-    if (preferredPrinter) {
-      showToast('🖨️ فاكرك اختار "' + preferredPrinter + '" من قائمة الطابعات في نافذة الطباعة', 'info', 6000)
-    }
-
-    const barcodeCode = selectedPatient.barcode_seq
-      ? getBarcodeCode(selectedPatient)
-      : null
+  // بيبني نفس محتوى التقرير المستخدم بالظبط في زرار "طباعة التقرير" (من غير هيدر/فوتر صفحة الـ HTML الكاملة)
+  // عشان نقدر نستخدمه في مكانين: نافذة الطباعة، وتحويله لصورة/PDF للمشاركة على واتساب
+  const buildReportInnerHtml = (patient) => {
+    const barcodeCode = patient.barcode_seq ? getBarcodeCode(patient) : null
 
     let barcodeHtml = ''
     if (barcodeCode) {
@@ -472,11 +413,11 @@ export default function Reports() {
     const rLow = design.report_result_low_color
     const colors = { hc, tc, ttc, rNormal, rHigh, rLow }
 
-    const genderText = selectedPatient.gender === 'ذكر' ? 'Male' : 'Female'
+    const genderText = patient.gender === 'ذكر' ? 'Male' : 'Female'
     const printDate = new Date().toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    const visitDate = new Date(selectedPatient.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    const groups = groupedTests(selectedPatient)
-    const splitResult = splitTests(selectedPatient)
+    const visitDate = new Date(patient.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    const groups = groupedTests(patient)
+    const splitResult = splitTests(patient)
     const singleTests = splitResult.singleTests
     const panelGroups = splitResult.panelGroups
     const doctorName = settings?.doctor_name || 'اسم الطبيب'
@@ -525,6 +466,56 @@ export default function Reports() {
         <tbody>${tableRows}</tbody>
       </table>` : ''
 
+    return `
+      <div style="height:90px; margin-bottom:6mm;"></div>
+      <hr style="border:none; border-top:2px solid ${hc}; margin:10px 0;" />
+      <div style="background:${hc}; color:white; text-align:center; padding:6px; font-size:${fs + 2}px; font-weight:bold; margin-bottom:12px; border-radius:3px; letter-spacing:1px;">
+        Laboratory Report
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px 30px; flex:1;">
+          ${[
+            ['Patient Name :', patient.name],
+            ['Print Date :', printDate],
+            ['Sex / Age :', `${genderText} / ${patient.age || '-'} Years`],
+            ['Visit Date :', visitDate],
+            ['Referred By :', patient.doctor || '-'],
+          ].map(([label, value]) => `
+            <div style="display:flex; gap:5px; font-size:${fs}px;">
+              <span style="font-weight:bold; color:${hc}; white-space:nowrap;">${label}</span>
+              <span style="color:#333;">${value}</span>
+            </div>
+          `).join('')}
+        </div>
+        ${barcodeHtml}
+      </div>
+      <hr style="border:none; border-top:1px solid #ccc; margin:8px 0;" />
+
+      ${panelsHtml}
+      ${historyHtml}
+      ${singleTableHtml}
+
+      <div style="margin-top:25px; display:flex; justify-content:space-between; align-items:flex-end; padding-top:12px; border-top:2px solid ${hc};">
+        <div style="width:100px; height:65px; border:2px dashed ${hc}; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:${fs}px; color:${hc}; font-weight:bold; direction:rtl;">
+          ختم المعمل
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:${fs + 1}px; font-weight:bold; color:${hc}; margin-bottom:25px;">Dr. ${doctorName}</div>
+          <div style="width:160px; border-bottom:1px solid ${hc}; margin:0 auto;"></div>
+        </div>
+      </div>
+    `
+  }
+
+  const printReport = () => {
+    if (!selectedPatient) return
+
+    if (preferredPrinter) {
+      showToast('🖨️ فاكرك اختار "' + preferredPrinter + '" من قائمة الطابعات في نافذة الطباعة', 'info', 6000)
+    }
+
+    const innerHtml = buildReportInnerHtml(selectedPatient)
+
     const html = `
       <html dir="ltr">
       <head>
@@ -537,43 +528,7 @@ export default function Reports() {
         </style>
       </head>
       <body>
-        <div style="height:90px; margin-bottom:6mm;"></div>
-        <hr style="border:none; border-top:2px solid ${hc}; margin:10px 0;" />
-        <div style="background:${hc}; color:white; text-align:center; padding:6px; font-size:${fs + 2}px; font-weight:bold; margin-bottom:12px; border-radius:3px; letter-spacing:1px;">
-          Laboratory Report
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px 30px; flex:1;">
-            ${[
-              ['Patient Name :', selectedPatient.name],
-              ['Print Date :', printDate],
-              ['Sex / Age :', `${genderText} / ${selectedPatient.age || '-'} Years`],
-              ['Visit Date :', visitDate],
-              ['Referred By :', selectedPatient.doctor || '-'],
-            ].map(([label, value]) => `
-              <div style="display:flex; gap:5px; font-size:${fs}px;">
-                <span style="font-weight:bold; color:${hc}; white-space:nowrap;">${label}</span>
-                <span style="color:#333;">${value}</span>
-              </div>
-            `).join('')}
-          </div>
-          ${barcodeHtml}
-        </div>
-        <hr style="border:none; border-top:1px solid #ccc; margin:8px 0;" />
-
-        ${panelsHtml}
-        ${historyHtml}
-        ${singleTableHtml}
-
-        <div style="margin-top:25px; display:flex; justify-content:space-between; align-items:flex-end; padding-top:12px; border-top:2px solid ${hc};">
-          <div style="width:100px; height:65px; border:2px dashed ${hc}; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:${fs}px; color:${hc}; font-weight:bold; direction:rtl;">
-            ختم المعمل
-          </div>
-          <div style="text-align:center;">
-            <div style="font-size:${fs + 1}px; font-weight:bold; color:${hc}; margin-bottom:25px;">Dr. ${doctorName}</div>
-            <div style="width:160px; border-bottom:1px solid ${hc}; margin:0 auto;"></div>
-          </div>
-        </div>
+        ${innerHtml}
       </body>
       </html>
     `
@@ -582,6 +537,86 @@ export default function Reports() {
     frame.srcdoc = html
     frame.onload = () => {
       setTimeout(() => { frame.contentWindow.print() }, 500)
+    }
+  }
+
+  // بيولّد PDF من نفس محتوى التقرير اللي بيظهر عند الطباعة بالظبط، وبعدين يشاركه على واتساب.
+  // بيستخدم قائمة المشاركة بتاعة النظام (Web Share API) عشان يرفق ملف الـ PDF مباشرة في واتساب،
+  // ولو المتصفح مش بيدعم ده، بينزّل الـ PDF ويفتح واتساب برسالة نصية بديلة والمستخدم يرفقه يدويًا.
+  const shareReportViaWhatsApp = async () => {
+    if (!selectedPatient) return
+    if (!selectedPatient.phone) {
+      showToast('مفيش رقم موبايل مسجّل للمريض ده، مش هينفع نبعتله على واتساب', 'warning', 5000)
+      return
+    }
+    setSharingReport(true)
+    try {
+      const innerHtml = buildReportInnerHtml(selectedPatient)
+      const container = pdfContentRef.current
+      container.innerHTML = innerHtml
+      container.style.fontFamily = 'Arial, sans-serif'
+      container.style.fontSize = fs + 'px'
+      container.style.color = '#000'
+
+      // بستنى فريم واحد عشان الصور (الباركود) والتخطيط ياخدوا وقتهم يترسموا قبل التصوير
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+
+      const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff', useCORS: true })
+      const imgData = canvas.toDataURL('image/png')
+
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const imgWidth = pageWidth
+      const imgHeight = (canvas.height * imgWidth) / canvas.width
+
+      let heightLeft = imgHeight
+      let position = 0
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight
+        pdf.addPage()
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+        heightLeft -= pageHeight
+      }
+
+      const pdfBlob = pdf.output('blob')
+      const fileName = 'تقرير-' + selectedPatient.name + '.pdf'
+      const file = new File([pdfBlob], fileName, { type: 'application/pdf' })
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'تقرير التحليل',
+            text: 'تقرير تحليل ' + selectedPatient.name,
+          })
+          showToast('✅ اتفتحت قائمة المشاركة، اختر واتساب وابعت الملف', 'success', 4000)
+        } catch (shareErr) {
+          if (shareErr.name !== 'AbortError') {
+            showToast('حصل خطأ أثناء المشاركة: ' + shareErr.message, 'error', 5000)
+          }
+        }
+      } else {
+        const url = URL.createObjectURL(pdfBlob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = fileName
+        a.click()
+        URL.revokeObjectURL(url)
+        showToast('📥 اتحمل ملف PDF بالتقرير. المتصفح ده مش بيدعم المشاركة المباشرة، فهيفتحلك واتساب وترفق الملف يدويًا من المرفقات', 'info', 8000)
+
+        const message = 'أهلاً ' + selectedPatient.name + '، ده تقرير نتيجة التحليل بتاعتك 🙏'
+        const link = buildWhatsAppLink(selectedPatient.phone, message)
+        setTimeout(() => window.open(link, '_blank'), 1200)
+      }
+    } catch (err) {
+      showToast('حصل خطأ أثناء تجهيز ملف الـ PDF: ' + err.message, 'error', 5000)
+    } finally {
+      if (pdfContentRef.current) pdfContentRef.current.innerHTML = ''
+      setSharingReport(false)
     }
   }
 
@@ -887,6 +922,7 @@ export default function Reports() {
     <div className="p-6" dir="rtl">
 
       <iframe ref={printFrameRef} style={{ display: 'none' }} title="print-frame" />
+      <div ref={pdfContentRef} style={{ position: 'fixed', left: '-9999px', top: 0, width: '794px', background: 'white' }} />
 
       <div className="mb-6">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>التقارير</h1>
@@ -1048,7 +1084,7 @@ export default function Reports() {
                   borderTopColor: 'white', borderRadius: '50%', display: 'inline-block',
                 }} />
               )}
-              {sharingReport ? 'جاري التجهيز...' : '📤 مشاركة عبر واتساب'}
+              {sharingReport ? 'جاري تجهيز الـ PDF...' : '📤 مشاركة عبر واتساب (PDF)'}
             </button>
 
             <button onClick={() => setSelectedPatient(null)}

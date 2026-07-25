@@ -148,7 +148,10 @@ export default function Results() {
   useEffect(() => { fetchPatients() }, [])
 
   const fetchPatients = async () => {
-    const { data } = await supabase.from('patients').select('*, tests(*)').order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('patients').select('*, tests(*)').order('created_at', { ascending: false })
+    if (error) {
+      showToast('حصل خطأ أثناء تحميل قائمة المرضى: ' + error.message, 'error', 5000)
+    }
     setPatients(data || [])
     setLoading(false)
   }
@@ -158,26 +161,27 @@ export default function Results() {
     const { error } = await supabase.from('tests').update({ value, status }).eq('id', testId)
     setSavingTestId(null)
     if (error) {
-      showToast('حدث خطأ أثناء حفظ النتيجة: ' + error.message, 'error')
+      showToast('حدث خطأ أثناء حفظ النتيجة: ' + error.message, 'error', 5000)
       return
     }
     if (checkCritical(testName, value)) {
       showToast('🚨 قيمة حرجة في "' + testName + '": ' + value + ' — لازم مراجعة فورية من الدكتور', 'error', 10000)
     } else {
-      showToast('تم حفظ النتيجة', 'success')
+      showToast('✅ تم حفظ نتيجة "' + testName + '"', 'success')
     }
     fetchPatients()
   }
 
   const confirmDeleteTest = async () => {
     if (!deleteTestConfirm) return
+    const testName = deleteTestConfirm.name
     const { error } = await supabase.from('tests').delete().eq('id', deleteTestConfirm.id)
     setDeleteTestConfirm(null)
     if (error) {
-      showToast('حدث خطأ أثناء حذف التحليل: ' + error.message, 'error')
+      showToast('حدث خطأ أثناء حذف التحليل: ' + error.message, 'error', 5000)
       return
     }
-    showToast('تم حذف التحليل', 'success')
+    showToast('🗑️ تم حذف تحليل "' + testName + '"', 'success')
     fetchPatients()
   }
 
@@ -190,11 +194,11 @@ export default function Results() {
     }).eq('id', editTest.id)
     setSavingTestId(null)
     if (error) {
-      showToast('حدث خطأ أثناء حفظ التعديل: ' + error.message, 'error')
+      showToast('حدث خطأ أثناء حفظ التعديل: ' + error.message, 'error', 5000)
       return
     }
     setEditTest(null)
-    showToast('تم تعديل بيانات التحليل', 'success')
+    showToast('✅ تم تعديل بيانات التحليل', 'success')
     fetchPatients()
   }
 
@@ -208,8 +212,13 @@ export default function Results() {
     let cancelled = false
     const timeoutId = setTimeout(async () => {
       if (cancelled) return
-      await supabase.from('tests').delete().eq('patient_id', patientId)
-      await supabase.from('patients').delete().eq('id', patientId)
+      const { error: testsError } = await supabase.from('tests').delete().eq('patient_id', patientId)
+      const { error: patientError } = await supabase.from('patients').delete().eq('id', patientId)
+      if (testsError || patientError) {
+        showToast('حصل خطأ أثناء حذف "' + patientName + '": ' + (testsError?.message || patientError?.message), 'error', 5000)
+      } else {
+        showToast('🗑️ تم حذف "' + patientName + '" نهائيًا', 'success')
+      }
       fetchPatients()
     }, 5000)
 
@@ -234,24 +243,25 @@ export default function Results() {
     }).eq('id', editPatient.id)
     setSavingPatient(false)
     if (error) {
-      showToast('حدث خطأ أثناء حفظ التعديلات: ' + error.message, 'error')
+      showToast('حدث خطأ أثناء حفظ التعديلات: ' + error.message, 'error', 5000)
       return
     }
-    showToast('تم تعديل بيانات المريض', 'success')
+    showToast('✅ تم تعديل بيانات المريض', 'success')
     setEditPatient(null)
     fetchPatients()
   }
 
   const confirmDeletePanel = async () => {
     if (!deletePanelConfirm) return
+    const panelCode = deletePanelConfirm.panel_code
     const ids = deletePanelConfirm.items.map(i => i.id)
     const { error } = await supabase.from('tests').delete().in('id', ids)
     setDeletePanelConfirm(null)
     if (error) {
-      showToast('حدث خطأ أثناء حذف الباقة: ' + error.message, 'error')
+      showToast('حدث خطأ أثناء حذف الباقة: ' + error.message, 'error', 5000)
       return
     }
-    showToast('تم حذف الباقة بكل بنودها', 'success')
+    showToast('🗑️ تم حذف باقة "' + panelCode + '" بكل بنودها', 'success')
     fetchPatients()
   }
 
@@ -259,16 +269,17 @@ export default function Results() {
     const comment = panelCommentInput[instanceId] ?? ''
     const { error } = await supabase.from('tests').update({ comment }).in('id', itemIds)
     if (error) {
-      showToast('حدث خطأ أثناء حفظ التعليق: ' + error.message, 'error')
+      showToast('حدث خطأ أثناء حفظ التعليق: ' + error.message, 'error', 5000)
       return
     }
-    showToast('تم حفظ التعليق', 'success')
+    showToast('✅ تم حفظ التعليق', 'success')
     fetchPatients()
   }
 
   const finalizePanel = async (items) => {
     setFinalizingPanel(items[0]?.panel_instance_id)
     let anyCritical = false
+    let hadError = false
     for (const item of items) {
       const input = resultInput[item.id] || {}
       const relValue = input.relative_value ?? item.relative_value ?? ''
@@ -278,27 +289,31 @@ export default function Results() {
       if (item.result_type === 'relative_absolute') {
         const flag = calcFlag(absValue, item.absolute_range)
         if (checkCritical(item.name, absValue)) anyCritical = true
-        await supabase.from('tests').update({
+        const { error } = await supabase.from('tests').update({
           relative_value: relValue,
           absolute_value: absValue,
           flag,
           status: 'معتمد',
         }).eq('id', item.id)
+        if (error) hadError = true
       } else {
         const flag = calcFlag(singleValue, item.normal_range)
         if (checkCritical(item.name, singleValue)) anyCritical = true
-        await supabase.from('tests').update({
+        const { error } = await supabase.from('tests').update({
           value: singleValue,
           flag,
           status: 'معتمد',
         }).eq('id', item.id)
+        if (error) hadError = true
       }
     }
     setFinalizingPanel(null)
-    if (anyCritical) {
+    if (hadError) {
+      showToast('⚠️ حصل خطأ أثناء اعتماد بعض نتائج الباقة، راجع البيانات وحاول تاني', 'error', 6000)
+    } else if (anyCritical) {
       showToast('🚨 فيه قيمة حرجة جوه نتائج الباقة دي — راجعها فورًا قبل اعتماد التقرير', 'error', 10000)
     } else {
-      showToast('تم اعتماد نتائج الباقة بنجاح', 'success')
+      showToast('✅ تم اعتماد نتائج الباقة بنجاح', 'success')
     }
     fetchPatients()
   }
@@ -317,10 +332,10 @@ export default function Results() {
     const newPaid = !patient.paid
     const { error } = await supabase.from('patients').update({ paid: newPaid }).eq('id', patient.id)
     if (error) {
-      showToast('حدث خطأ أثناء تحديث حالة الدفع: ' + error.message, 'error')
+      showToast('حدث خطأ أثناء تحديث حالة الدفع: ' + error.message, 'error', 5000)
       return
     }
-    showToast(newPaid ? 'تم تسجيل المريض كـ"مدفوع"' : 'تم تسجيل المريض كـ"غير مدفوع"', 'success')
+    showToast(newPaid ? '💰 تم تسجيل "' + patient.name + '" كـ"مدفوع"' : '⏳ تم تسجيل "' + patient.name + '" كـ"غير مدفوع"', 'success')
     fetchPatients()
   }
 
