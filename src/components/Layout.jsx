@@ -11,6 +11,22 @@ const navItems = [
   { label: 'التقارير', icon: '📄', path: '/reports' },
 ]
 
+// بيحسب حالة اشتراك المعمل الحالي: منتهي / قرب ينتهي (٧ أيام أو أقل) / سارٍ / مش معروف
+const getSubscriptionStatus = (expiresAt) => {
+  if (!expiresAt) return null
+  const expiry = new Date(expiresAt)
+  const now = new Date()
+  const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+
+  if (daysLeft < 0) {
+    return { key: 'expired', daysLeft, message: `اشتراكك منتهي من ${Math.abs(daysLeft)} يوم. كلّم إدارة النظام فورًا لتجديد الاشتراك وتجنب توقف الخدمة.` }
+  }
+  if (daysLeft <= 7) {
+    return { key: 'soon', daysLeft, message: `اشتراكك هينتهي خلال ${daysLeft} يوم. برجاء التواصل مع إدارة النظام للتجديد قبل انتهائه.` }
+  }
+  return null
+}
+
 export default function Layout() {
   const [showNotifications, setShowNotifications] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -25,11 +41,21 @@ export default function Layout() {
   })
   const [editMode, setEditMode] = useState(false)
   const [editData, setEditData] = useState({})
+  const [savingProfile, setSavingProfile] = useState(false)
   const [showPasswordSection, setShowPasswordSection] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [changingPassword, setChangingPassword] = useState(false)
   const [msg, setMsg] = useState({ text: '', type: '' })
+
+  // حالة اشتراك المعمل الحالي (لو قرب ينتهي أو انتهى) + هل البانر متقفل النهاردة
+  const [subscriptionStatus, setSubscriptionStatus] = useState(null)
+  const [bannerDismissed, setBannerDismissed] = useState(false)
+
+  // Refs لقوائم الإشعارات والإعدادات، مستخدمة عشان نقفلهم لما تدوس برّاهم أو تدوس Escape
+  const notificationsRef = useRef(null)
+  const settingsRef = useRef(null)
 
   // شات "لابو" محفوظ هنا طول ما الـ Layout مش بيعمل remount
   // (يعني طول ما إنت جوه السيستم ومنقلتش بين الصفحات بـ refresh كامل)
@@ -62,6 +88,31 @@ export default function Layout() {
     document.documentElement.classList.toggle('dark', !!settings.darkMode)
   }, [settings.darkMode])
 
+  // قفل قائمة الإشعارات/الإعدادات لما تدوس برّاهم، أو تدوس Escape
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (showNotifications && notificationsRef.current && !notificationsRef.current.contains(e.target)) {
+        setShowNotifications(false)
+      }
+      if (showSettings && settingsRef.current && !settingsRef.current.contains(e.target)) {
+        setShowSettings(false)
+      }
+    }
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        setShowNotifications(false)
+        setShowSettings(false)
+        setShowProfile(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [showNotifications, showSettings])
+
   const saveSettings = (newSettings) => {
     setSettings(newSettings)
     localStorage.setItem('appSettings', JSON.stringify(newSettings))
@@ -77,7 +128,10 @@ export default function Layout() {
     }
 
     setUser(user)
-    const { data } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).maybeSingle()
+    const { data, error } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).maybeSingle()
+    if (error) {
+      console.error('فشل جلب بيانات المعمل:', error)
+    }
     if (data) {
       const profile = {
         labName: data.lab_name || 'نظام إدارة المعامل الطبية',
@@ -89,6 +143,15 @@ export default function Layout() {
       }
       setProfileData(profile)
       setLabName(data.lab_name || 'نظام إدارة المعامل الطبية')
+
+      // فحص حالة الاشتراك وعرض بانر لو قرب/انتهى
+      const status = getSubscriptionStatus(data.subscription_expires_at)
+      setSubscriptionStatus(status)
+      if (status) {
+        const today = new Date().toDateString()
+        const dismissedOn = localStorage.getItem(`sub_banner_dismissed_${user.id}`)
+        setBannerDismissed(dismissedOn === today)
+      }
     }
 
     // قراءة آخر وقت فتح فيه هذا الحساب الإشعارات (محفوظ لكل حساب لوحده)
@@ -99,17 +162,33 @@ export default function Layout() {
   }
 
   const fetchAdminNotifications = async (userId) => {
-    // مسح الإشعارات اللي عدى عليها أسبوع كامل
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    await supabase.from('admin_notifications').delete().lt('created_at', weekAgo)
+    try {
+      // مسح الإشعارات اللي عدى عليها أسبوع كامل
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      await supabase.from('admin_notifications').delete().lt('created_at', weekAgo)
 
-    const { data } = await supabase
-      .from('admin_notifications')
-      .select('*')
-      .or(`target_user_id.is.null,target_user_id.eq.${userId}`)
-      .order('created_at', { ascending: false })
-      .limit(10)
-    setAdminNotifications(data || [])
+      const { data, error } = await supabase
+        .from('admin_notifications')
+        .select('*')
+        .or(`target_user_id.is.null,target_user_id.eq.${userId}`)
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      if (error) {
+        console.error('فشل جلب الإشعارات:', error)
+        return
+      }
+      setAdminNotifications(data || [])
+    } catch (err) {
+      console.error('حصل خطأ غير متوقع أثناء جلب الإشعارات:', err)
+    }
+  }
+
+  // إخفاء بانر تنبيه الاشتراك لحد بكرة (بيرجع يظهر تاني اليوم اللي بعده لو لسه المشكلة قايمة)
+  const dismissSubscriptionBanner = () => {
+    if (!user) return
+    localStorage.setItem(`sub_banner_dismissed_${user.id}`, new Date().toDateString())
+    setBannerDismissed(true)
   }
 
   // فتح/قفل قائمة الإشعارات، ولما تفتح بنسجل إن المستخدم شافها لحد دلوقتي
@@ -139,37 +218,59 @@ export default function Layout() {
   }
 
   const saveProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      setMsg({ text: 'يجب تسجيل الدخول أولاً', type: 'error' })
-      return
-    }
+    if (savingProfile) return
+    setSavingProfile(true)
+    setMsg({ text: '', type: '' })
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setMsg({ text: 'يجب تسجيل الدخول أولاً', type: 'error' })
+        return
+      }
 
-    const { data: existing } = await supabase.from('lab_settings').select('id').eq('user_id', user.id).maybeSingle()
-    const payload = {
-      lab_name: editData.labName,
-      doctor_name: editData.doctorName,
-      qualification: editData.qualification,
-      address: editData.address,
-      phone: editData.phone,
-      email: editData.email,
-      updated_at: new Date().toISOString(),
-    }
+      const trimmedData = {
+        lab_name: (editData.labName || '').trim(),
+        doctor_name: (editData.doctorName || '').trim(),
+        qualification: (editData.qualification || '').trim(),
+        address: (editData.address || '').trim(),
+        phone: (editData.phone || '').trim(),
+        email: (editData.email || '').trim(),
+        updated_at: new Date().toISOString(),
+      }
 
-    if (existing) {
-      await supabase.from('lab_settings').update(payload).eq('user_id', user.id)
-    } else {
-      await supabase.from('lab_settings').insert([{ user_id: user.id, ...payload }])
-    }
+      const { data: existing } = await supabase.from('lab_settings').select('id').eq('user_id', user.id).maybeSingle()
 
-    setProfileData({ ...editData })
-    setLabName(editData.labName)
-    setEditMode(false)
-    setMsg({ text: 'تم حفظ البيانات بنجاح ✅', type: 'success' })
-    setTimeout(() => setMsg({ text: '', type: '' }), 2000)
+      const { error } = existing
+        ? await supabase.from('lab_settings').update(trimmedData).eq('user_id', user.id)
+        : await supabase.from('lab_settings').insert([{ user_id: user.id, ...trimmedData }])
+
+      if (error) {
+        setMsg({ text: 'فشل حفظ البيانات: ' + error.message, type: 'error' })
+        return
+      }
+
+      const savedProfile = {
+        labName: trimmedData.lab_name,
+        doctorName: trimmedData.doctor_name,
+        qualification: trimmedData.qualification,
+        address: trimmedData.address,
+        phone: trimmedData.phone,
+        email: trimmedData.email,
+      }
+      setProfileData(savedProfile)
+      setLabName(savedProfile.labName || 'نظام إدارة المعامل الطبية')
+      setEditMode(false)
+      setMsg({ text: 'تم حفظ البيانات بنجاح ✅', type: 'success' })
+      setTimeout(() => setMsg({ text: '', type: '' }), 2000)
+    } catch (err) {
+      setMsg({ text: 'حصل خطأ غير متوقع: ' + err.message, type: 'error' })
+    } finally {
+      setSavingProfile(false)
+    }
   }
 
   const changePassword = async () => {
+    if (changingPassword) return
     if (!currentPassword || !newPassword || !confirmPassword) {
       setMsg({ text: 'من فضلك اكمل كل الحقول', type: 'error' }); return
     }
@@ -179,20 +280,28 @@ export default function Layout() {
     if (newPassword.length < 6) {
       setMsg({ text: 'كلمة السر لازم تكون 6 حروف على الأقل', type: 'error' }); return
     }
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: user.email, password: currentPassword,
-    })
-    if (signInError) {
-      setMsg({ text: 'كلمة السر الحالية غلط', type: 'error' }); return
+
+    setChangingPassword(true)
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email, password: currentPassword,
+      })
+      if (signInError) {
+        setMsg({ text: 'كلمة السر الحالية غلط', type: 'error' }); return
+      }
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) {
+        setMsg({ text: 'حدث خطأ: ' + error.message, type: 'error' }); return
+      }
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('')
+      setShowPasswordSection(false)
+      setMsg({ text: 'تم تغيير كلمة السر بنجاح ✅', type: 'success' })
+      setTimeout(() => setMsg({ text: '', type: '' }), 2000)
+    } catch (err) {
+      setMsg({ text: 'حصل خطأ غير متوقع: ' + err.message, type: 'error' })
+    } finally {
+      setChangingPassword(false)
     }
-    const { error } = await supabase.auth.updateUser({ password: newPassword })
-    if (error) {
-      setMsg({ text: 'حدث خطأ: ' + error.message, type: 'error' }); return
-    }
-    setCurrentPassword(''); setNewPassword(''); setConfirmPassword('')
-    setShowPasswordSection(false)
-    setMsg({ text: 'تم تغيير كلمة السر بنجاح ✅', type: 'success' })
-    setTimeout(() => setMsg({ text: '', type: '' }), 2000)
   }
 
   // عداد "الجديد" بيحسب بس الإشعارات اللي وصلت بعد آخر مرة فتح فيها المستخدم القائمة
@@ -259,7 +368,7 @@ export default function Layout() {
           <div className="flex items-center gap-3">
 
             {/* الإشعارات - الإدمن فقط */}
-            <div className="relative">
+            <div className="relative" ref={notificationsRef}>
               <button onClick={toggleNotifications} className="text-xl relative" aria-label="فتح الإشعارات">
                 🔔
                 {totalBadge > 0 && (
@@ -279,7 +388,9 @@ export default function Layout() {
                       <p className="p-4 text-sm text-center" style={{ color: 'var(--on-surface-variant)' }}>لا توجد إشعارات</p>
                     ) : adminNotifications.map((n, i) => (
                       <div key={i} className="p-3" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
-                        <p className="text-sm font-medium" style={{ color: '#1a2456' }}>{n.title}</p>
+                        <p className="text-sm font-medium" style={{ color: n.title === 'تنبيه اشتراك' ? '#dc2626' : '#1a2456' }}>
+                          {n.title === 'تنبيه اشتراك' ? '💳 ' : ''}{n.title}
+                        </p>
                         <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)' }}>{n.message}</p>
                         <p className="text-xs mt-1" style={{ color: 'var(--outline)' }}>
                           {new Date(n.created_at).toLocaleString('ar-EG')}
@@ -292,7 +403,7 @@ export default function Layout() {
             </div>
 
             {/* الإعدادات */}
-            <div className="relative">
+            <div className="relative" ref={settingsRef}>
               <button onClick={() => { setShowSettings(!showSettings); setShowNotifications(false); setShowProfile(false) }} className="text-xl" aria-label="فتح الإعدادات">⚙️</button>
               {showSettings && (
                 <div className="absolute left-0 top-10 bg-white rounded-xl shadow-xl z-50 w-72" style={{ border: '1px solid var(--outline-variant)' }} dir="rtl">
@@ -364,6 +475,27 @@ export default function Layout() {
           </div>
         </div>
 
+        {/* بانر تنبيه اشتراك المعمل - ظاهر فوق كل الصفحات لو الاشتراك قرب/انتهى ولحد ما يتقفل */}
+        {subscriptionStatus && !bannerDismissed && (
+          <div className="px-6 py-3 flex items-center justify-between gap-3 flex-wrap"
+            style={{
+              background: subscriptionStatus.key === 'expired' ? '#fee2e2' : '#fef3c7',
+              borderBottom: '1px solid ' + (subscriptionStatus.key === 'expired' ? '#fecaca' : '#fde68a'),
+            }}>
+            <p className="text-sm font-medium" style={{ color: subscriptionStatus.key === 'expired' ? '#dc2626' : '#92400e' }}>
+              {subscriptionStatus.key === 'expired' ? '⛔' : '⏰'} {subscriptionStatus.message}
+            </p>
+            <button onClick={dismissSubscriptionBanner}
+              className="text-xs font-medium px-3 py-1 rounded-lg flex-shrink-0"
+              style={{
+                background: 'rgba(0,0,0,0.06)',
+                color: subscriptionStatus.key === 'expired' ? '#dc2626' : '#92400e',
+              }}>
+              ✕ إخفاء لحد بكرة
+            </button>
+          </div>
+        )}
+
         {/* Profile Modal */}
         {showProfile && (
           <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.4)' }}>
@@ -420,15 +552,15 @@ export default function Layout() {
                 </button>
               ) : (
                 <div className="flex gap-2 mb-3">
-                  <button onClick={cancelEdit}
+                  <button onClick={cancelEdit} disabled={savingProfile}
                     className="flex-1 py-2 rounded-lg text-sm font-medium"
-                    style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+                    style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)', opacity: savingProfile ? 0.5 : 1 }}>
                     إلغاء
                   </button>
-                  <button onClick={saveProfile}
+                  <button onClick={saveProfile} disabled={savingProfile}
                     className="flex-1 py-2 rounded-lg text-sm font-medium text-white"
-                    style={{ background: 'var(--primary-container)' }}>
-                    حفظ
+                    style={{ background: 'var(--primary-container)', opacity: savingProfile ? 0.7 : 1 }}>
+                    {savingProfile ? 'جاري الحفظ...' : 'حفظ'}
                   </button>
                 </div>
               )}
@@ -459,15 +591,15 @@ export default function Layout() {
                       </div>
                     ))}
                     <div className="flex gap-2">
-                      <button onClick={() => { setShowPasswordSection(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setMsg({ text: '', type: '' }) }}
+                      <button onClick={() => { setShowPasswordSection(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword('') }} disabled={changingPassword}
                         className="flex-1 py-2 rounded-lg text-sm"
-                        style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+                        style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)', opacity: changingPassword ? 0.5 : 1 }}>
                         إلغاء
                       </button>
-                      <button onClick={changePassword}
+                      <button onClick={changePassword} disabled={changingPassword}
                         className="flex-1 py-2 rounded-lg text-sm text-white font-medium"
-                        style={{ background: 'var(--primary-container)' }}>
-                        تغيير
+                        style={{ background: 'var(--primary-container)', opacity: changingPassword ? 0.7 : 1 }}>
+                        {changingPassword ? 'جاري التغيير...' : 'تغيير'}
                       </button>
                     </div>
                   </div>
