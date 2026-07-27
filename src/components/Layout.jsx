@@ -9,6 +9,8 @@ const navItems = [
   { label: 'نتائج التحاليل', icon: '🔬', path: '/results' },
   { label: 'المساعد الذكي', icon: '🤖', path: '/ai-assistant' },
   { label: 'التقارير', icon: '📄', path: '/reports' },
+  { label: 'التقرير المالي', icon: '💰', path: '/financial-report' },
+  { label: 'الأطباء المحوّلون', icon: '👨‍⚕️', path: '/referring-doctors' },
 ]
 
 // بيحسب حالة اشتراك المعمل الحالي: منتهي / قرب ينتهي (٧ أيام أو أقل) / سارٍ / مش معروف

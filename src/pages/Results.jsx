@@ -66,6 +66,15 @@ const buildWhatsAppLink = (phone, message) => {
   return 'https://wa.me/' + clean + '?text=' + encodeURIComponent(message)
 }
 
+// بيفتح واتساب برسالة جاهزة تخص تحليل/باقة معينة بقت جاهزة - بيتستخدم من زرار الـ toast
+// اللي بيظهر تلقائي بعد اعتماد النتيجة، مش بيفتح لوحده من غير ضغطة عشان المتصفح ميحجبوش كـ pop-up
+const openWhatsAppForReadyResult = (patient, label) => {
+  if (!patient?.phone) return
+  const message = 'أهلاً ' + patient.name + '، نتيجة "' + label + '" جاهزة، تقدر تستلمها من المعمل في أي وقت 🙏'
+  const link = buildWhatsAppLink(patient.phone, message)
+  if (link) window.open(link, '_blank')
+}
+
 const getBucket = (dateStr) => {
   const date = new Date(dateStr)
   const now = new Date()
@@ -157,7 +166,7 @@ export default function Results() {
     setLoading(false)
   }
 
-  const updateTest = async (testId, value, status, testName) => {
+  const updateTest = async (testId, value, status, testName, patient) => {
     setSavingTestId(testId)
     const { error } = await supabase.from('tests').update({ value, status }).eq('id', testId)
     setSavingTestId(null)
@@ -167,6 +176,11 @@ export default function Results() {
     }
     if (checkCritical(testName, value)) {
       showToast('🚨 قيمة حرجة في "' + testName + '": ' + value + ' — لازم مراجعة فورية من الدكتور', 'error', 10000)
+    } else if (status === 'معتمد' && patient?.phone) {
+      showToast('✅ تم حفظ نتيجة "' + testName + '" — جاهزة للإرسال للمريض', 'success', 8000, {
+        label: '📤 ابعت واتساب',
+        onClick: () => openWhatsAppForReadyResult(patient, testName)
+      })
     } else {
       showToast('✅ تم حفظ نتيجة "' + testName + '"', 'success')
     }
@@ -277,7 +291,7 @@ export default function Results() {
     fetchPatients()
   }
 
-  const finalizePanel = async (items) => {
+  const finalizePanel = async (items, patient) => {
     setFinalizingPanel(items[0]?.panel_instance_id)
     let anyCritical = false
     let hadError = false
@@ -309,10 +323,16 @@ export default function Results() {
       }
     }
     setFinalizingPanel(null)
+    const panelLabel = items[0]?.panel_code || 'الباقة'
     if (hadError) {
       showToast('⚠️ حصل خطأ أثناء اعتماد بعض نتائج الباقة، راجع البيانات وحاول تاني', 'error', 6000)
     } else if (anyCritical) {
       showToast('🚨 فيه قيمة حرجة جوه نتائج الباقة دي — راجعها فورًا قبل اعتماد التقرير', 'error', 10000)
+    } else if (patient?.phone) {
+      showToast('✅ تم اعتماد نتائج "' + panelLabel + '" — جاهزة للإرسال للمريض', 'success', 8000, {
+        label: '📤 ابعت واتساب',
+        onClick: () => openWhatsAppForReadyResult(patient, panelLabel)
+      })
     } else {
       showToast('✅ تم اعتماد نتائج الباقة بنجاح', 'success')
     }
@@ -718,7 +738,7 @@ export default function Results() {
                                 style={{ background: '#e8f0fe', color: 'var(--primary-container)' }}>
                                 حفظ التعليق
                               </button>
-                              <button onClick={() => finalizePanel(group.items)} disabled={isFinalizingThis}
+                              <button onClick={() => finalizePanel(group.items, p)} disabled={isFinalizingThis}
                                 className="px-3 py-1.5 rounded-lg text-xs text-white font-medium flex items-center gap-2"
                                 style={{ background: '#065f46', opacity: isFinalizingThis ? 0.7 : 1 }}>
                                 {isFinalizingThis && (
@@ -785,7 +805,7 @@ export default function Results() {
                                       const value = resultInput[t.id]?.value ?? t.value ?? ''
                                       const manualStage = resultInput[t.id]?.stage ?? t.status ?? 'تم التجميع'
                                       const status = value.trim() !== '' ? 'معتمد' : (manualStage === 'معتمد' ? 'قيد التحليل' : manualStage)
-                                      updateTest(t.id, value, status, t.name)
+                                      updateTest(t.id, value, status, t.name, p)
                                     }} disabled={savingTestId === t.id}
                                       className="px-3 py-1 rounded-lg text-xs text-white font-medium"
                                       style={{ background: 'var(--primary-container)', opacity: savingTestId === t.id ? 0.7 : 1 }}>
