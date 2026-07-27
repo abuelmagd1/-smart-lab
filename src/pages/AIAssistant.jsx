@@ -2,6 +2,7 @@
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useToast } from '../components/Toast'
+import { formatAge } from '../utils/referenceRanges'
 
 // المفتاح اتشال من هنا خالص - بقى محفوظ سيرفر-سايد بس جوه Supabase Edge Function (gemini-proxy)
 // عشان محدش يقدر يشوفه من المتصفح تاني
@@ -119,6 +120,41 @@ const blobToBase64 = (blob) => {
   })
 }
 
+// بيضغط الصورة (تصغير الأبعاد + ضغط JPEG) قبل تحويلها لـ base64 وإرسالها للابو.
+// صور الكاميرا الحقيقية ممكن تكون كذا ميجا، وبعتها كما هي كـ base64 كان بيبطّئ الرد
+// جدًا (وقت رفع البيانات + وقت معالجتها). دلوقتي أي صورة بتتصغر لأقصى بعد 1600px
+// وتتضغط لـ JPEG جودة 85% قبل الإرسال، وده بيقلل الحجم بشكل كبير من غير فرق ملحوظ
+// في وضوح التفاصيل المطلوبة (نص التحليل، الأرقام).
+const compressImageToBase64 = (file, maxSize, quality) => {
+  maxSize = maxSize || 1600
+  quality = quality || 0.85
+  return new Promise(function (resolve, reject) {
+    const reader = new FileReader()
+    reader.onerror = function () { reject(new Error('فشل قراءة الصورة')) }
+    reader.onload = function (e) {
+      const img = new Image()
+      img.onerror = function () { reject(new Error('الملف ده مش صورة صالحة')) }
+      img.onload = function () {
+        let width = img.width
+        let height = img.height
+        if (width > maxSize || height > maxSize) {
+          if (width > height) { height = Math.round(height * (maxSize / width)); width = maxSize }
+          else { width = Math.round(width * (maxSize / height)); height = maxSize }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
+        const dataUrl = canvas.toDataURL('image/jpeg', quality)
+        resolve(dataUrl.split(',')[1])
+      }
+      img.src = e.target.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 const pcmBase64ToWavBlob = (base64Pcm, sampleRate, numChannels, bitDepth) => {
   sampleRate = sampleRate || 24000
   numChannels = numChannels || 1
@@ -228,7 +264,7 @@ const resolvePatient = (patients, name, age) => {
 
 const ambiguityMessage = (candidates) => {
   const list = candidates.map(function (p) {
-    return '- ' + p.name + ' (' + p.age + ' سنة، ' + p.gender + (p.doctor ? '، دكتور: ' + p.doctor : '') + ')'
+    return '- ' + p.name + ' (' + formatAge(p.age, p.age_unit) + '، ' + p.gender + (p.doctor ? '، دكتور: ' + p.doctor : '') + ')'
   }).join('\n')
   return 'في أكتر من مريض بنفس الاسم تقريبًا، اسأل المستخدم يحدد المريض بالظبط (بالسن أو الدكتور المحوّل):\n' + list
 }
@@ -471,9 +507,18 @@ export default function AIAssistant() {
     historyRef.current = { previousId: null }
   }
 
-  const getPatients = async () => {
-    const res = await supabase.from('patients').select('*, tests(*)')
+  // نسخة خفيفة: بتجيب بيانات المرضى الأساسية بس (من غير التحاليل) - دي اللي بتتفحص كل رسالة
+  // عشان لابو يقدر يحدد المريض المقصود بالاسم، من غير ما نجيب كل تحاليل كل المرضى في كل مرة
+  const getPatientsLight = async () => {
+    const res = await supabase.from('patients').select('id, name, age, age_unit, gender, phone, doctor')
     return res.data || []
+  }
+
+  // بيجيب مريض واحد بالتفصيل (مع كل تحاليله) - بيتستخدم بس لما فعلاً نحتاج تفاصيل مريض معين
+  // (find_patient، أو تنفيذ نتيجة تحليل)، بدل ما نجيب كل المرضى وتحاليلهم في كل رسالة
+  const getPatientWithTests = async (patientId) => {
+    const res = await supabase.from('patients').select('*, tests(*)').eq('id', patientId).single()
+    return res.data || null
   }
 
   const stopSpeaking = () => {
@@ -542,9 +587,9 @@ export default function AIAssistant() {
         continue
       }
       try {
-        const base64 = await blobToBase64(file)
+        const base64 = await compressImageToBase64(file)
         const previewUrl = URL.createObjectURL(file)
-        const imageItem = { id: Date.now() + '_' + Math.random().toString(36).slice(2), mimeType: file.type, base64: base64, previewUrl: previewUrl }
+        const imageItem = { id: Date.now() + '_' + Math.random().toString(36).slice(2), mimeType: 'image/jpeg', base64: base64, previewUrl: previewUrl }
         setPendingImages(function (prev) { return prev.concat([imageItem]) })
       } catch (err) {
         showStatus('⚠️ فشل تحميل الصورة "' + file.name + '"')
@@ -606,7 +651,7 @@ export default function AIAssistant() {
     abortControllerRef.current = controller
 
     try {
-      const patients = await getPatients()
+      const patients = await getPatientsLight()
       const contentBlocks = [{ type: 'text', text: userMessageText }]
       imagesToSend.forEach(function (img) {
         contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
@@ -876,7 +921,7 @@ export default function AIAssistant() {
 
     if (name === 'list_patients') {
       if (!patients.length) return 'لا يوجد مرضى مسجلين حاليًا.'
-      const roster = patients.map(function (p) { return p.name + ' (' + p.age + ' سنة، ' + p.gender + ')' }).join('، ')
+      const roster = patients.map(function (p) { return p.name + ' (' + formatAge(p.age, p.age_unit) + '، ' + p.gender + ')' }).join('، ')
       return 'عدد المرضى: ' + patients.length + '. الأسماء: ' + roster
     }
 
@@ -885,13 +930,15 @@ export default function AIAssistant() {
       if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
-      const p = resolved.match
+      showStatus('⏳ بيجيب بيانات ' + resolved.match.name + '...')
+      const full = await getPatientWithTests(resolved.match.id)
+      const p = full || resolved.match
       const testsInfo = (p.tests && p.tests.length)
         ? p.tests.map(function (t) {
           return t.name + ' - النتيجة: ' + (t.value || 'لم تدخل بعد') + ' ' + (t.unit || '') + ' - المعدل الطبيعي: ' + (t.normal_range || 'غير محدد') + ' - الحالة: ' + t.status
         }).join('. ')
         : 'لا توجد تحاليل مسجلة'
-      return 'بيانات المريض "' + p.name + '": ' + p.age + ' سنة، ' + p.gender + '، دكتور محوّل: ' + (p.doctor || 'غير محدد') + '. التحاليل: ' + testsInfo
+      return 'بيانات المريض "' + p.name + '": ' + formatAge(p.age, p.age_unit) + '، ' + p.gender + '، دكتور محوّل: ' + (p.doctor || 'غير محدد') + '. التحاليل: ' + testsInfo
     }
 
     if (name === 'open_patient_report') {
@@ -966,8 +1013,7 @@ export default function AIAssistant() {
 
   const executeTestResult = async (data) => {
     const status = (data.value && data.value.trim()) ? 'معتمد' : 'تم التجميع'
-    const patients = await getPatients()
-    const patient = patients.find(function (p) { return p.id === data.patientId })
+    const patient = await getPatientWithTests(data.patientId)
     let test = null
     if (patient && patient.tests) {
       test = patient.tests.find(function (t) { return t.name && t.name.toLowerCase() === data.testName.toLowerCase() })
