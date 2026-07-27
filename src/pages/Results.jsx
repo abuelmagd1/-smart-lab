@@ -4,6 +4,7 @@ import BarcodeLabel from '../components/BarcodeLabel'
 import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import { useToast } from '../components/Toast'
+import { formatAge } from '../utils/referenceRanges'
 
 const statusStyle = {
   'تم التجميع': { bg: '#f3f4f6', color: '#374151' },
@@ -578,7 +579,7 @@ export default function Results() {
                     }}>
                     <p className="font-semibold" style={{ color: 'var(--on-surface)' }}>{p.name}</p>
                     <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
-                      {p.age} سنة • {p.doctor} • {p.tests?.length} بند
+                      {formatAge(p.age, p.age_unit)} • {p.doctor} • {p.tests?.length} بند
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap justify-end">

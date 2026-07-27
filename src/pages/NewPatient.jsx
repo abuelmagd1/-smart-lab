@@ -3,10 +3,11 @@ import { supabase } from '../supabase'
 import BarcodeLabel from '../components/BarcodeLabel'
 import { useToast } from '../components/Toast'
 import useUnsavedChanges from '../hooks/useUnsavedChanges'
+import { getReferenceRange, ageToApproxDays } from '../utils/referenceRanges'
 
 export default function NewPatient() {
   const showToast = useToast()
-  const [form, setForm] = useState({ name: '', phone: '', age: '', birth_date: '', gender: '', doctor: '', notes: '' })
+  const [form, setForm] = useState({ name: '', phone: '', age: '', ageUnit: 'Years', birth_date: '', gender: '', doctor: '', notes: '' })
   const [testCatalog, setTestCatalog] = useState([])
   const [panels, setPanels] = useState([])
   const [panelItemsMap, setPanelItemsMap] = useState({})
@@ -106,6 +107,26 @@ export default function NewPatient() {
     fetchPanels()
   }
 
+  // بيصيغ المعدل الطبيعي المجاب من قاعدة البيانات كنص "min-max" بنفس شكل النصوص
+  // القديمة المخزنة في الكتالوج، عشان باقي النظام (تلوين H/L، العرض) يفهمه من غير أي تعديل
+  const formatRange = (range) => {
+    if (!range) return null
+    const { min_value, max_value } = range
+    if (min_value == null || max_value == null) return null
+    return `${min_value}-${max_value}`
+  }
+
+  // بيرجع المعدل الطبيعي المناسب لسن ونوع المريض لو موجود في جدول test_reference_ranges،
+  // وإلا بيرجع للمعدل الثابت المخزن في الكتالوج (fallback أمان، النظام يفضل شغال زي الأول)
+  const resolveNormalRange = async (testName, component, ageDays, gender, fallbackRange) => {
+    try {
+      const range = await getReferenceRange(testName, component, ageDays, gender)
+      return formatRange(range) || fallbackRange
+    } catch {
+      return fallbackRange
+    }
+  }
+
   const handleSubmit = async () => {
     if (!form.name.trim()) {
       showToast('من فضلك ادخل اسم المريض', 'warning')
@@ -125,11 +146,19 @@ export default function NewPatient() {
 
     setLoading(true)
 
+    // بنحسب سن المريض بالأيام عشان نطابقه مع شرائح الأعمار الدقيقة (زي "0-2 يوم" للمواليد)
+    // في جدول المعدلات. لو تاريخ الميلاد متسجل بنستخدمه (أدق)، وإلا بنحول السن + الوحدة
+    // اللي اختارها المستخدم (سنة/شهر/يوم) لأيام تقريبية
+    const ageDays = form.birth_date
+      ? Math.floor((new Date() - new Date(form.birth_date)) / (1000 * 60 * 60 * 24))
+      : ageToApproxDays(ageNum, form.ageUnit)
+
     const { data: patient, error } = await supabase
       .from('patients')
       .insert([{
         name: form.name,
         age: ageNum,
+        age_unit: form.ageUnit,
         gender: form.gender,
         phone: form.phone,
         doctor: form.doctor,
@@ -144,21 +173,23 @@ export default function NewPatient() {
       return
     }
 
-    const singleTestRows = selectedTests.map(t => ({
+    // التحاليل المفردة: بنحاول نجيب معدل مناسب لسن المريض، ولو مفيش نرجع لمعدل الكتالوج الثابت
+    const singleTestRows = await Promise.all(selectedTests.map(async (t) => ({
       patient_id: patient.id,
       name: t.name,
-      normal_range: t.normal_range,
+      normal_range: await resolveNormalRange(t.name, null, ageDays, form.gender, t.normal_range),
       unit: t.unit,
       status: 'تم التجميع',
       result_type: 'single',
       price: t.price || 0,
-    }))
+    })))
 
     const panelRows = []
-    selectedPanels.forEach(panel => {
+    for (const panel of selectedPanels) {
       const items = panelItemsMap[panel.id] || []
       const instanceId = crypto.randomUUID()
-      items.forEach(item => {
+
+      const rows = await Promise.all(items.map(async (item) => {
         let normalRange = item.normal_range
         let absoluteRange = null
 
@@ -166,9 +197,17 @@ export default function NewPatient() {
           const [rel, abs] = item.normal_range.split('|')
           normalRange = rel.trim()
           absoluteRange = abs.trim()
+          // ملحوظة: التحاليل من نوع "نسبي/مطلق" (زي مكوّنات صورة الدم التفصيلية) لسه بتاخد
+          // معدلها من الكتالوج الثابت، لأن جدول المعدلات حسب السن حاليًا بيخزن قيمة واحدة
+          // بس لكل مكوّن. لو عايز معدلات دقيقة حسب السن لهذول كمان، محتاجين نوسّع الجدول
+          // بعمودين إضافيين (relative_min/max) بدل (min_value/max_value) الحاليين.
+        } else {
+          // تحليل مفرد جوه باقة (زي HGB أو PLT) - بنحاول نجيب معدل حسب السن، باستخدام
+          // كود الباقة (panel.code) كـ test_name واسم البند (item.name) كـ component
+          normalRange = await resolveNormalRange(panel.code, item.name, ageDays, form.gender, item.normal_range)
         }
 
-        panelRows.push({
+        return {
           patient_id: patient.id,
           name: item.name,
           unit: item.unit,
@@ -182,9 +221,11 @@ export default function NewPatient() {
           result_type: item.result_type,
           display_order: item.display_order,
           price: panel.price || 0,
-        })
-      })
-    })
+        }
+      }))
+
+      panelRows.push(...rows)
+    }
 
     const allRows = [...singleTestRows, ...panelRows]
 
@@ -200,7 +241,7 @@ export default function NewPatient() {
     setSuccess(true)
     setLastPatient(patient)
     showToast(`تم تسجيل المريض "${form.name}" بنجاح`, 'success')
-    setForm({ name: '', phone: '', age: '', birth_date: '', gender: '', doctor: '', notes: '' })
+    setForm({ name: '', phone: '', age: '', ageUnit: 'Years', birth_date: '', gender: '', doctor: '', notes: '' })
     setSelectedTests([])
     setSelectedPanels([])
     setTimeout(() => setSuccess(false), 3000)
@@ -311,8 +352,6 @@ export default function NewPatient() {
             {[
               { label: 'الاسم بالكامل', key: 'name', type: 'text', placeholder: 'أحمد محمد علي', required: true },
               { label: 'رقم الهاتف', key: 'phone', type: 'tel', placeholder: '01012345678' },
-              { label: 'السن', key: 'age', type: 'number', placeholder: '30', required: true },
-              { label: 'تاريخ الميلاد', key: 'birth_date', type: 'date', placeholder: '' },
               { label: 'اسم الدكتور', key: 'doctor', type: 'text', placeholder: 'د. محمد أحمد' },
             ].map(field => (
               <div key={field.key}>
@@ -328,6 +367,41 @@ export default function NewPatient() {
                 />
               </div>
             ))}
+
+            {/* السن + الوحدة: افتراضيًا "سنة" زي أي حالة عادية، وتقدر تبدّلها لشهر/يوم بس لو محتاج (مواليد/رضّع) */}
+            <div>
+              <label htmlFor="age" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>
+                السن<span style={{ color: '#dc2626' }}> *</span>
+              </label>
+              <div className="flex gap-2">
+                <input id="age" type="number" placeholder="30" value={form.age}
+                  onChange={e => setForm(prev => ({ ...prev, age: e.target.value }))}
+                  className="flex-1 px-4 py-3 rounded-lg outline-none text-right"
+                  style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
+                  onFocus={e => e.target.style.border = '2px solid var(--primary-container)'}
+                  onBlur={e => e.target.style.border = '1px solid var(--outline-variant)'}
+                />
+                <select value={form.ageUnit} onChange={e => setForm(prev => ({ ...prev, ageUnit: e.target.value }))}
+                  className="px-3 py-3 rounded-lg outline-none text-right"
+                  style={{ border: '1px solid var(--outline-variant)', fontSize: '14px', background: 'white', width: '90px' }}>
+                  <option value="Years">سنة</option>
+                  <option value="Months">شهر</option>
+                  <option value="Days">يوم</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="birth_date" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>تاريخ الميلاد (اختياري)</label>
+              <input id="birth_date" type="date" value={form.birth_date}
+                onChange={e => setForm(prev => ({ ...prev, birth_date: e.target.value }))}
+                className="w-full px-4 py-3 rounded-lg outline-none text-right"
+                style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}
+                onFocus={e => e.target.style.border = '2px solid var(--primary-container)'}
+                onBlur={e => e.target.style.border = '1px solid var(--outline-variant)'}
+              />
+            </div>
+
             <div>
               <label htmlFor="gender" className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>النوع</label>
               <select id="gender" value={form.gender} onChange={e => setForm(prev => ({ ...prev, gender: e.target.value }))}
@@ -487,7 +561,7 @@ export default function NewPatient() {
 
         {/* أزرار */}
         <div className="flex gap-3 justify-end" style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '1.5rem' }}>
-          <button onClick={() => { setForm({ name: '', phone: '', age: '', birth_date: '', gender: '', doctor: '', notes: '' }); setSelectedTests([]); setSelectedPanels([]) }}
+          <button onClick={() => { setForm({ name: '', phone: '', age: '', ageUnit: 'Years', birth_date: '', gender: '', doctor: '', notes: '' }); setSelectedTests([]); setSelectedPanels([]) }}
             className="px-6 py-2 rounded-lg text-sm font-medium"
             style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
             إلغاء
