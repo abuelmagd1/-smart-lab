@@ -5,6 +5,8 @@ import { ToastProvider } from './components/Toast'
 import ErrorBoundary from './components/ErrorBoundary'
 import NetworkStatusWatcher from './components/NetworkStatusWatcher'
 import SessionWatcher from './components/SessionWatcher'
+import ReferringDoctors from './pages/ReferringDoctors'
+import FinancialReport from './pages/FinancialReport'
 
 const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -117,6 +119,8 @@ function App() {
               <Route element={session && role === 'admin' ? <AdminLayout /> :<Navigate to="/login" />}>
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/add-lab" element={<AddLab />} />
+                <Route path="/referring-doctors" element={<ReferringDoctors />} />
+<Route path="/financial-report" element={<FinancialReport />} />
                 <Route path="/admin/notifications" element={<AdminNotifications />} />
               </Route>
             </Routes>
