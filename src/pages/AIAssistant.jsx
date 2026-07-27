@@ -656,8 +656,11 @@ export default function AIAssistant() {
       imagesToSend.forEach(function (img) {
         contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
       })
-      const streamState = { id: null, text: '' }
+      // ⏱️ تشخيص مؤقت لقياس مصدر البطء - هيظهر في Console بس، مش هيأثر على أي حاجة تانية
+      const streamState = { id: null, text: '', startTime: performance.now(), firstTokenAt: null }
+      console.log('⏱️ [لابو] بدأ الإرسال: ' + new Date().toLocaleTimeString('ar-EG'))
       await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patients, 0, streamState)
+      console.log('⏱️ [لابو] انتهى كل حاجة بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من البداية')
     } catch (err) {
       if (err.name === 'AbortError') {
         setMessages(function (prev) { return prev.concat([{ role: 'status', content: '⏹ تم إيقاف الطلب', time: Date.now() }]) })
@@ -707,12 +710,14 @@ export default function AIAssistant() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error('لازم تسجّل دخول عشان تستخدم المساعد الذكي')
 
+    const fetchStartedAt = performance.now()
     const response = await fetch(supabase.supabaseUrl + '/functions/v1/gemini-proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
       signal: signal,
       body: JSON.stringify({ path: INTERACTIONS_PATH + '?alt=sse', body: body })
     })
+    console.log('⏱️ [لابو] جولة ' + depth + ': وصلت أول استجابة HTTP بعد ' + ((performance.now() - fetchStartedAt) / 1000).toFixed(1) + ' ثانية (من بداية هذه الجولة، بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من إجمالي البداية)')
 
     if (!response.ok || !response.body) {
       let apiErrorMsg = 'رمز الخطأ: ' + response.status
@@ -782,6 +787,7 @@ export default function AIAssistant() {
     if (finalInteractionId) historyRef.current.previousId = finalInteractionId
 
     if (finalStatus === 'requires_action' && functionCallOrder.length > 0) {
+      console.log('⏱️ [لابو] جولة ' + depth + ': طلب تنفيذ أداة (' + functionCallOrder.map(function (idx) { return functionCallsMap[idx].name }).join(', ') + ') بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من البداية')
       const functionResults = []
       for (let i = 0; i < functionCallOrder.length; i++) {
         const fc = functionCallsMap[functionCallOrder[i]]
@@ -806,6 +812,8 @@ export default function AIAssistant() {
       return
     }
 
+    console.log('⏱️ [لابو] انتهت كل الجولات (بدون tool call إضافي) بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية إجمالي')
+
     // خلصت كل الجولات (مفيش أدوات معلّقة) - دلوقتي نتأكد إن فيه رد ظهر
     // ملاحظة: مبقاش بيتقرا بصوت عالي تلقائيًا؛ المستخدم هو اللي بيدوس على زرار 🔊 لو عايز يسمعه
     if (!streamState.text) {
@@ -821,6 +829,10 @@ export default function AIAssistant() {
   // بدل ما نستنى الرد كامل يخلص وبعدين يظهر مرة واحدة
   const appendAssistantStreamText = (streamState, chunk) => {
     if (!chunk) return
+    if (streamState.firstTokenAt === null) {
+      streamState.firstTokenAt = performance.now()
+      console.log('⏱️ [لابو] وصل أول حرف من الرد بعد ' + ((streamState.firstTokenAt - streamState.startTime) / 1000).toFixed(1) + ' ثانية من الإرسال')
+    }
     streamState.text += chunk
     if (!streamState.id) {
       streamState.id = 'stream_' + Date.now() + '_' + Math.random().toString(36).slice(2)
