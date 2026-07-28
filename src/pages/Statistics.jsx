@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import { useToast } from '../components/Toast'
+import { exportToCSV } from '../utils/exportUtils'
 
 // نفس منطق فصل التحاليل المفردة عن الباقات المستخدم في صفحة التقارير
 const splitTests = (patient) => {
@@ -21,9 +22,21 @@ const splitTests = (patient) => {
   return { singleTests, panelGroups }
 }
 
+// بيحسب التكلفة الفعلية لمريض واحد - سعر كل باقة بيتاخد مرة واحدة بس (مش لكل بند جواها)
+// عشان كل بنود الباقة الواحدة بتحمل نفس السعر مكرر (شوف NewPatient.jsx)
+const patientCost = (patient) => {
+  const { singleTests, panelGroups } = splitTests(patient)
+  let cost = 0
+  singleTests.forEach(t => { cost += parseFloat(t.price) || 0 })
+  Object.values(panelGroups).forEach(g => {
+    cost += parseFloat(g.items && g.items[0] ? g.items[0].price : 0) || 0
+  })
+  return cost
+}
+
 const periodOptions = [
   { key: 'today', label: 'اليوم', icon: '📅' },
-  { key: 'week', label: 'آخر 7 أيام', icon: '🗓ï¸' },
+  { key: 'week', label: 'آخر 7 أيام', icon: '🗓️' },
   { key: 'month', label: 'الشهر الحالي', icon: '📆' },
   { key: 'custom', label: 'فترة مخصصة', icon: '🎯' },
 ]
@@ -66,6 +79,8 @@ const formatRangeLabel = (start, end) => {
 const computeStats = (patientsList) => {
   let totalRevenue = 0
   let totalOrders = 0
+  let collected = 0
+  let pending = 0
   const doctorsMap = {}
   const rankMap = {}
 
@@ -74,6 +89,9 @@ const computeStats = (patientsList) => {
       doctorsMap[p.doctor] = (doctorsMap[p.doctor] || 0) + 1
     }
     const { singleTests, panelGroups } = splitTests(p)
+    const cost = patientCost(p)
+    if (p.paid) collected += cost
+    else pending += cost
 
     singleTests.forEach(t => {
       totalRevenue += parseFloat(t.price) || 0
@@ -104,6 +122,8 @@ const computeStats = (patientsList) => {
     totalPatients: patientsList.length,
     totalRevenue,
     totalOrders,
+    collected,
+    pending,
     ranked,
     topDoctors,
   }
@@ -123,7 +143,7 @@ const DeltaBadge = ({ value }) => {
   const up = value > 0
   return (
     <span className="text-xs font-medium px-2 py-0.5 rounded-full"
-      style={{ background: up ? '#d1fae5' : '#fee2e2', color: up ? '#065f46' :'#dc2626' }}>
+      style={{ background: up ? '#d1fae5' : '#fee2e2', color: up ? '#065f46' : '#dc2626' }}>
       {up ? '▲' : '▼'} {Math.abs(value)}%
     </span>
   )
@@ -170,7 +190,7 @@ export default function Statistics() {
     return d >= s && d < e
   }
 
-  const currentPatients = allPatients.filter(p => inRange(p.created_at, start,end))
+  const currentPatients = allPatients.filter(p => inRange(p.created_at, start, end))
   const previousPatients = allPatients.filter(p => inRange(p.created_at, prevStart, prevEnd))
 
   const stats = computeStats(currentPatients)
@@ -184,17 +204,43 @@ export default function Statistics() {
   const filteredPatients = currentPatients.filter(p => p.name?.includes(patientSearch))
 
   const cards = [
-    { label: 'عدد المرضى', value: stats.totalPatients.toLocaleString('ar-EG'), delta: pctChange(stats.totalPatients, prevStats.totalPatients), icon:'👥', color: '#1a2456' },
+    { label: 'عدد المرضى', value: stats.totalPatients.toLocaleString('ar-EG'), delta: pctChange(stats.totalPatients, prevStats.totalPatients), icon: '👥', color: '#1a2456' },
     { label: 'عدد الطلبات (تحاليل + باقات)', value: stats.totalOrders.toLocaleString('ar-EG'), delta: pctChange(stats.totalOrders, prevStats.totalOrders), icon: '🧪', color: '#0e7490' },
     { label: 'الإيراد الإجمالي', value: stats.totalRevenue.toLocaleString('ar-EG') + ' جنيه', delta: pctChange(stats.totalRevenue, prevStats.totalRevenue), icon: '💰', color: '#065f46' },
     { label: 'متوسط الإيراد لكل مريض', value: avgPerPatient.toLocaleString('ar-EG', { maximumFractionDigits: 0 }) + ' جنيه', delta: null, icon: '📊', color: '#92400e' },
   ]
 
+  const exportPatientsReport = () => {
+    const rows = filteredPatients.map(p => ({
+      name: p.name,
+      date: new Date(p.created_at).toLocaleDateString('ar-EG'),
+      doctor: p.doctor || '-',
+      orders: splitTests(p).singleTests.length + Object.keys(splitTests(p).panelGroups).length,
+      cost: patientCost(p).toFixed(2),
+      status: p.paid ? 'مدفوع' : 'غير مدفوع',
+    }))
+    exportToCSV('تقرير_الإحصائيات', [
+      { key: 'name', label: 'اسم المريض' },
+      { key: 'date', label: 'التاريخ' },
+      { key: 'doctor', label: 'الدكتور' },
+      { key: 'orders', label: 'عدد الطلبات' },
+      { key: 'cost', label: 'التكلفة (جنيه)' },
+      { key: 'status', label: 'حالة الدفع' },
+    ], rows)
+  }
+
   return (
     <div className="p-6" dir="rtl">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>الإحصائيات والتقارير المالية</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>عدد المرضى، التحاليل الأكثر طلبًا، والإيراد حسب الفترة</p>
+      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--on-surface)', fontFamily: 'var(--font-display)' }}>الإحصائيات والتقارير المالية</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>عدد المرضى، التحاليل الأكثر طلبًا، والإيراد حسب الفترة</p>
+        </div>
+        <button onClick={exportPatientsReport}
+          className="px-4 py-2 rounded-lg text-sm font-medium"
+          style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
+          📊 تصدير Excel
+        </button>
       </div>
 
       {/* اختيار الفترة */}
@@ -247,7 +293,7 @@ export default function Statistics() {
       ) : (
         <>
           {/* بطاقات الملخص */}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4 mb-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4 mb-4">
             {cards.map((c, i) => (
               <div key={i} className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
                 <div className="flex items-center justify-between mb-3">
@@ -261,6 +307,20 @@ export default function Statistics() {
                 <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)' }}>{c.label}</p>
               </div>
             ))}
+          </div>
+
+          {/* بطاقات المدفوع/غير المدفوع */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 mb-6">
+            <div className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+              <div className="text-2xl mb-2">✅</div>
+              <p className="text-xl font-bold" style={{ color: '#065f46' }}>{stats.collected.toLocaleString('ar-EG')} جنيه</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)' }}>تم تحصيله فعليًا في الفترة دي</p>
+            </div>
+            <div className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+              <div className="text-2xl mb-2">⏳</div>
+              <p className="text-xl font-bold" style={{ color: '#dc2626' }}>{stats.pending.toLocaleString('ar-EG')} جنيه</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)' }}>متبقي (غير مدفوع) في الفترة دي</p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -281,7 +341,7 @@ export default function Statistics() {
                           <span className="text-sm font-medium" style={{ color: 'var(--on-surface)' }}>{item.name}</span>
                           <span className="text-xs px-1.5 py-0.5 rounded-full font-medium"
                             style={{
-                              background: item.type === 'باقة' ? '#e0f2fe': '#f1f3f4',
+                              background: item.type === 'باقة' ? '#e0f2fe' : '#f1f3f4',
                               color: item.type === 'باقة' ? '#0369a1' : 'var(--on-surface-variant)'
                             }}>
                             {item.type}
@@ -350,7 +410,7 @@ export default function Statistics() {
               <input type="text" placeholder="ابحث باسم المريض..." value={patientSearch}
                 onChange={e => setPatientSearch(e.target.value)}
                 className="px-3 py-2 rounded-lg outline-none text-sm text-right"
-                style={{ border: '1px solid var(--outline-variant)', minWidth:'220px' }} />
+                style={{ border: '1px solid var(--outline-variant)', minWidth: '220px' }} />
             </div>
 
             {filteredPatients.length === 0 ? (
@@ -365,17 +425,14 @@ export default function Statistics() {
                       <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>الدكتور</th>
                       <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>عدد الطلبات</th>
                       <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>التكلفة</th>
+                      <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>حالة الدفع</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredPatients.map(p => {
                       const { singleTests, panelGroups } = splitTests(p)
                       const orderCount = singleTests.length + Object.keys(panelGroups).length
-                      let cost = 0
-                      singleTests.forEach(t => { cost += parseFloat(t.price) || 0 })
-                      Object.values(panelGroups).forEach(g => {
-                        cost += parseFloat(g.items && g.items[0] ? g.items[0].price : 0) || 0
-                      })
+                      const cost = patientCost(p)
                       return (
                         <tr key={p.id} style={{ borderTop: '1px solid var(--outline-variant)' }}>
                           <td className="p-3 text-sm font-medium" style={{ color: 'var(--on-surface)' }}>{p.name}</td>
@@ -385,6 +442,12 @@ export default function Statistics() {
                           <td className="p-3 text-xs" style={{ color: 'var(--on-surface-variant)' }}>{p.doctor || '-'}</td>
                           <td className="p-3 text-xs" style={{ color: 'var(--on-surface-variant)' }}>{orderCount}</td>
                           <td className="p-3 text-xs font-semibold" style={{ color: '#065f46' }}>{cost.toLocaleString('ar-EG')} جنيه</td>
+                          <td className="p-3">
+                            <span className="text-xs font-medium px-2 py-0.5 rounded-full"
+                              style={p.paid ? { background: '#d1fae5', color: '#065f46' } : { background: '#fee2e2', color: '#991b1b' }}>
+                              {p.paid ? 'مدفوع' : 'غير مدفوع'}
+                            </span>
+                          </td>
                         </tr>
                       )
                     })}

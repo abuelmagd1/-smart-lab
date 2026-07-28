@@ -6,7 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import NetworkStatusWatcher from './components/NetworkStatusWatcher'
 import SessionWatcher from './components/SessionWatcher'
 import ReferringDoctors from './pages/ReferringDoctors'
-import FinancialReport from './pages/FinancialReport'
+
 
 const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -115,7 +115,7 @@ function App() {
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/statistics" element={<Statistics />} />
                 <Route path="/referring-doctors" element={<ReferringDoctors />} />
-                <Route path="/financial-report" element={<FinancialReport />} />
+            
               </Route>
 
               <Route element={session && role === 'admin' ? <AdminLayout /> :<Navigate to="/login" />}>

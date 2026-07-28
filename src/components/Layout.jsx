@@ -9,7 +9,7 @@ const navItems = [
   { label: 'نتائج التحاليل', icon: '🔬', path: '/results' },
   { label: 'المساعد الذكي', icon: '🤖', path: '/ai-assistant' },
   { label: 'التقارير', icon: '📄', path: '/reports' },
-  { label: 'التقرير المالي', icon: '💰', path: '/financial-report' },
+  { label: 'الإحصائيات', icon: '📈', path: '/statistics' },
   { label: 'الأطباء المحوّلون', icon: '👨‍⚕️', path: '/referring-doctors' },
 ]
 
