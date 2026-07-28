@@ -11,6 +11,7 @@ const navItems = [
   { label: 'التقارير', icon: '📄', path: '/reports' },
   { label: 'الإحصائيات', icon: '📈', path: '/statistics' },
   { label: 'الأطباء المحوّلون', icon: '👨‍⚕️', path: '/referring-doctors' },
+  { label: 'المستلزمات والكيماويات', icon: '🧪', path: '/supplies' },
 ]
 
 // بيحسب حالة اشتراك المعمل الحالي: منتهي / قرب ينتهي (٧ أيام أو أقل) / سارٍ / مش معروف

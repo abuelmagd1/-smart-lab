@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import NetworkStatusWatcher from './components/NetworkStatusWatcher'
 import SessionWatcher from './components/SessionWatcher'
 import ReferringDoctors from './pages/ReferringDoctors'
+import Supplies from './pages/Supplies'
 
 
 const Login = lazy(() => import('./pages/Login'))
@@ -114,6 +115,7 @@ function App() {
                 <Route path="/ai-assistant" element={<AIAssistant />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/statistics" element={<Statistics />} />
+                <Route path="/supplies" element={<Supplies />} />
                 <Route path="/referring-doctors" element={<ReferringDoctors />} />
             
               </Route>

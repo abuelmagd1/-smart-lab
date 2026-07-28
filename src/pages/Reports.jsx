@@ -1358,7 +1358,7 @@ export default function Reports() {
 
           <div className="w-full lg:flex-1 order-1 lg:order-3 bg-white rounded-xl overflow-hidden overflow-x-auto" style={{ border: '1px solid var(--outline-variant)' }}>
             {settings ? (
-              <div ref={previewRef}>
+              <div ref={previewRef} dir="ltr">
                 <PreviewReport patient={selectedPatient} />
               </div>
             ) : (
