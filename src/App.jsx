@@ -114,13 +114,14 @@ function App() {
                 <Route path="/ai-assistant" element={<AIAssistant />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/statistics" element={<Statistics />} />
+                <Route path="/referring-doctors" element={<ReferringDoctors />} />
+                <Route path="/financial-report" element={<FinancialReport />} />
               </Route>
 
               <Route element={session && role === 'admin' ? <AdminLayout /> :<Navigate to="/login" />}>
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/add-lab" element={<AddLab />} />
-                <Route path="/referring-doctors" element={<ReferringDoctors />} />
-<Route path="/financial-report" element={<FinancialReport />} />
+                
                 <Route path="/admin/notifications" element={<AdminNotifications />} />
               </Route>
             </Routes>
