@@ -3,6 +3,7 @@ import { useNavigate, useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useToast } from '../components/Toast'
 import { formatAge } from '../utils/referenceRanges'
+import { summarizeFinances, buildFinancialReportHTML, getSimpleRange } from '../utils/financeUtils'
 
 // المفتاح اتشال من هنا خالص - بقى محفوظ سيرفر-سايد بس جوه Supabase Edge Function (gemini-proxy)
 // عشان محدش يقدر يشوفه من المتصفح تاني
@@ -400,6 +401,18 @@ const TOOLS = [
       properties: { query: { type: 'string' } },
       required: ['query']
     }
+  },
+  {
+    type: 'function',
+    name: 'generate_financial_report',
+    description: 'يجهّز تقرير مالي (عدد مرضى، إيراد، تحصيل، مصروفات، صافي ربح، أكتر تحاليل وأطباء) لفترة معينة، ويفتحه في تاب جديد جاهز للطباعة أو الحفظ كملف PDF. عملية قراءة آمنة بالكامل (مش بتعدّل أي بيانات)، فنفّذها فورًا بدون انتظار تأكيد أي وقت المستخدم يطلب تقرير أو "PDF" عن الفلوس أو الإيراد.',
+    parameters: {
+      type: 'object',
+      properties: {
+        period: { type: 'string', enum: ['day', 'month', 'year'], description: 'الفترة المطلوبة: day = اليوم، month = الشهر الحالي، year = السنة الحالية' }
+      },
+      required: ['period']
+    }
   }
 ]
 
@@ -431,7 +444,7 @@ const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous ب�
   '- find_patient: استخدمها أول ما تحتاج أي تفصيل عن مريض معين (تحاليله، نتائجه، حالته). لا تخمّن بيانات مريض من نفسك أبدًا.\n\n' +
   'قواعد التأكيد قبل التنفيذ (مهم جدًا، أمان البيانات الطبية يعتمد عليها):\n' +
   '- propose_new_patient، propose_test_result، propose_update_patient، propose_delete_patient: الأربعة دول بيعرضوا البيانات في الشات للمستخدم يأكدها بنفسه، وما بيحفظوش أو يعدّلوا أو يمسحوا حاجة فعليًا. لو استخدمت واحدة منهم، قول للمستخدم إن البيانات معروضة وتنتظر تأكيده، ومتقولش أبدًا إن العملية "تمت".\n' +
-  '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info: آمنين (إضافة بس، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
+  '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info و generate_financial_report: آمنين (إضافة بس، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
   '- لو الأداة رجعت لك رسالة فيها "في أكتر من مريض بنفس الاسم"، اسأل المستخدم يحدد قبل ما تكمل، لا تخمّن.\n\n' +
   'التعامل مع الكلام الغامض أو الصوت غير الواضح:\n' +
   '- لو الرسالة غير واضحة وما تقدرش تحدد بدقة إنها تطابق أمر معين، لا تستخدم أي أداة فوراً، خمّن أقرب أمر واسأل المستخدم بوضوح\n' +
@@ -982,6 +995,36 @@ export default function AIAssistant() {
         if (err.name === 'AbortError') throw err
         if (err.name === 'TimeoutError') return 'البحث في الإنترنت أخذ وقت طويل، اعتمد على معلوماتك العامة بدلاً من ذلك.'
         return 'حصل خطأ في البحث.'
+      }
+    }
+
+    if (name === 'generate_financial_report') {
+      try {
+        showStatus('📄 بيجهّز التقرير المالي...')
+        const period = args.period || 'month'
+        const { start, end, label } = getSimpleRange(period)
+
+        const [patientsRes, expensesRes] = await Promise.all([
+          supabase.from('patients').select('*, tests(*)').gte('created_at', start.toISOString()).lt('created_at', end.toISOString()),
+          supabase.from('lab_expenses').select('*').gte('expense_date', start.toISOString().slice(0, 10)).lt('expense_date', end.toISOString().slice(0, 10)),
+        ])
+
+        if (patientsRes.error) throw patientsRes.error
+
+        const summary = summarizeFinances(patientsRes.data || [], expensesRes.data || [])
+        const rangeLabel = start.toLocaleDateString('ar-EG') + ' → ' + new Date(end.getTime() - 1).toLocaleDateString('ar-EG')
+        const html = buildFinancialReportHTML(summary, { periodLabel: label, rangeLabel })
+
+        const reportWindow = window.open('', '_blank')
+        if (!reportWindow) {
+          return 'المتصفح منع فتح تاب جديد (pop-up). من فضلك اسمح بالنوافذ المنبثقة لهذا الموقع من إعدادات المتصفح وحاول تاني.'
+        }
+        reportWindow.document.write(html)
+        reportWindow.document.close()
+
+        return 'تم تجهيز التقرير المالي عن "' + label + '" وفتحه في تاب جديد. من فيه، دوس زرار "🖨️ طباعة / حفظ PDF" وفي نافذة الطباعة اختار Save as PDF عشان تحفظه كملف.'
+      } catch (err) {
+        return 'حصل خطأ أثناء تجهيز التقرير المالي: ' + err.message
       }
     }
 
