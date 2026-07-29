@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../supabase'
 import { useToast } from '../components/Toast'
+import AnimatedNumber from '../components/AnimatedNumber'
 
 export default function Supplies() {
   const showToast = useToast()
@@ -212,16 +213,16 @@ export default function Supplies() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-6 lg:grid-cols-3">
-        <div className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+        <div className="bg-white rounded-xl p-4 transition-all hover:shadow-md" style={{ border: '1px solid var(--outline-variant)' }}>
           <div className="text-2xl mb-2">📦</div>
-          <div className="text-2xl font-bold" style={{ color: '#1a2456' }}>{supplies.length}</div>
+          <div className="text-2xl font-bold" style={{ color: '#1a2456' }}><AnimatedNumber value={supplies.length} /></div>
           <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>إجمالي الأصناف</div>
         </div>
         <button onClick={() => setShowLowOnly(prev => !prev)}
-          className="bg-white rounded-xl p-4 text-right transition-all"
+          className="bg-white rounded-xl p-4 text-right transition-all hover:shadow-md"
           style={{ border: showLowOnly ? '2px solid #dc2626' : '1px solid var(--outline-variant)' }}>
           <div className="text-2xl mb-2">⚠️</div>
-          <div className="text-2xl font-bold" style={{ color: lowStockCount > 0 ? '#dc2626' : '#1a2456' }}>{lowStockCount}</div>
+          <div className="text-2xl font-bold" style={{ color: lowStockCount > 0 ? '#dc2626' : '#1a2456' }}><AnimatedNumber value={lowStockCount} /></div>
           <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
             أصناف محتاجة تجديد {showLowOnly ? '(معروض بس دول)' : ''}
           </div>
@@ -409,7 +410,16 @@ export default function Supplies() {
       )}
 
       {loading ? (
-        <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>جاري التحميل...</div>
+        <div className="bg-white rounded-xl overflow-hidden" style={{ border: '1px solid var(--outline-variant)' }}>
+          {[1, 2, 3].map(i => (
+            <div key={i} className="p-4 animate-pulse flex items-center gap-4" style={{ borderTop: i > 1 ? '1px solid var(--outline-variant)' : 'none' }}>
+              <div style={{ width: '130px', height: '14px', background: '#f1f3f4', borderRadius: '6px' }} />
+              <div style={{ width: '70px', height: '14px', background: '#f1f3f4', borderRadius: '6px' }} />
+              <div style={{ width: '70px', height: '14px', background: '#f1f3f4', borderRadius: '6px' }} />
+              <div style={{ width: '60px', height: '20px', background: '#f1f3f4', borderRadius: '999px' }} />
+            </div>
+          ))}
+        </div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>
           {supplies.length === 0
@@ -442,7 +452,7 @@ export default function Supplies() {
             </thead>
             <tbody>
               {filtered.map(s => (
-                <tr key={s.id} style={{ borderTop: '1px solid var(--outline-variant)', background: isLow(s) ? '#fef2f2' : 'transparent' }}>
+                <tr key={s.id} className="transition-colors hover:bg-gray-50" style={{ borderTop: '1px solid var(--outline-variant)', background: isLow(s) ? '#fef2f2' : 'transparent' }}>
                   <td className="p-3 text-sm font-medium" style={{ color: 'var(--on-surface)' }}>{s.name}</td>
                   <td className="p-3 text-sm" style={{ color: 'var(--on-surface-variant)' }}>{s.current_quantity} {s.unit}</td>
                   <td className="p-3 text-sm" style={{ color: 'var(--on-surface-variant)' }}>{s.minimum_threshold} {s.unit}</td>

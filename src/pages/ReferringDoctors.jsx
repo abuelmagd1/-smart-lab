@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../supabase'
 import { useToast } from '../components/Toast'
 import { calculatePatientRevenue, getDateBucket, PERIOD_FILTERS } from '../utils/financeUtils'
 import { exportToCSV } from '../utils/exportUtils'
+import AnimatedNumber from '../components/AnimatedNumber'
 
 export default function ReferringDoctors() {
   const showToast = useToast()
@@ -15,7 +16,26 @@ export default function ReferringDoctors() {
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [deleting, setDeleting] = useState(false)
 
+  const nameInputRef = useRef(null)
+
   useEffect(() => { fetchAll() }, [])
+
+  // إغلاق أي مودال مفتوح بزرار Escape - تجربة استخدام أفضل من غير ما تلمس الماوس
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key !== 'Escape') return
+      if (saving || deleting) return // منع الإغلاق أثناء عملية شغالة فعليًا
+      if (editDoctor) setEditDoctor(null)
+      else if (deleteConfirm) setDeleteConfirm(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editDoctor, deleteConfirm, saving, deleting])
+
+  // focus تلقائي على حقل الاسم لما مودال الإضافة/التعديل يفتح
+  useEffect(() => {
+    if (editDoctor && nameInputRef.current) nameInputRef.current.focus()
+  }, [editDoctor])
 
   const fetchAll = async () => {
     setLoading(true)
@@ -63,13 +83,24 @@ export default function ReferringDoctors() {
   const openEdit = (doctor) => setEditDoctor({ ...doctor })
 
   const saveDoctor = async () => {
-    if (!editDoctor.name?.trim()) {
+    const trimmedName = editDoctor.name?.trim()
+    if (!trimmedName) {
       showToast('من فضلك اكتب اسم الدكتور', 'warning')
       return
     }
+
+    // تنبيه لو في دكتور مسجل بنفس الاسم أصلاً (بدون حساسية لحالة الأحرف)، عشان نتجنب تكرار غير مقصود
+    const duplicate = doctors.find(d =>
+      d.name?.trim().toLowerCase() === trimmedName.toLowerCase() && d.id !== editDoctor.id
+    )
+    if (duplicate) {
+      showToast('في دكتور مسجل بنفس الاسم بالفعل: "' + duplicate.name + '". غيّر الاسم أو عدّل على السجل الموجود', 'warning', 6000)
+      return
+    }
+
     setSaving(true)
     const payload = {
-      name: editDoctor.name.trim(),
+      name: trimmedName,
       phone: editDoctor.phone?.trim() || null,
       commission_percent: parseFloat(editDoctor.commission_percent) || 0,
       notes: editDoctor.notes?.trim() || null,
@@ -114,6 +145,12 @@ export default function ReferringDoctors() {
     ], registeredRows)
   }
 
+  const handleModalBackdropClick = (closeFn, isBusy) => (e) => {
+    if (e.target !== e.currentTarget) return
+    if (isBusy) return
+    closeFn()
+  }
+
   return (
     <div className="p-6" dir="rtl">
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
@@ -136,19 +173,19 @@ export default function ReferringDoctors() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-6 lg:grid-cols-3">
-        <div className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+        <div className="bg-white rounded-xl p-4 transition-all hover:shadow-md" style={{ border: '1px solid var(--outline-variant)' }}>
           <div className="text-2xl mb-2">👨‍⚕️</div>
-          <div className="text-2xl font-bold" style={{ color: '#1a2456' }}>{doctors.length}</div>
+          <div className="text-2xl font-bold" style={{ color: '#1a2456' }}><AnimatedNumber value={doctors.length} /></div>
           <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>أطباء مسجلين</div>
         </div>
-        <div className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+        <div className="bg-white rounded-xl p-4 transition-all hover:shadow-md" style={{ border: '1px solid var(--outline-variant)' }}>
           <div className="text-2xl mb-2">💰</div>
-          <div className="text-2xl font-bold" style={{ color: '#065f46' }}>{totalCommission.toFixed(2)}</div>
+          <div className="text-2xl font-bold" style={{ color: '#065f46' }}><AnimatedNumber value={totalCommission} decimals={2} /></div>
           <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>إجمالي العمولات المستحقة (جنيه)</div>
         </div>
-        <div className="bg-white rounded-xl p-4" style={{ border: '1px solid var(--outline-variant)' }}>
+        <div className="bg-white rounded-xl p-4 transition-all hover:shadow-md" style={{ border: '1px solid var(--outline-variant)' }}>
           <div className="text-2xl mb-2">⚠️</div>
-          <div className="text-2xl font-bold" style={{ color: unregisteredNames.length > 0 ? '#dc2626' : '#1a2456' }}>{unregisteredNames.length}</div>
+          <div className="text-2xl font-bold" style={{ color: unregisteredNames.length > 0 ? '#dc2626' : '#1a2456' }}><AnimatedNumber value={unregisteredNames.length} /></div>
           <div className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>أطباء غير مسجلين في العمولات</div>
         </div>
       </div>
@@ -168,15 +205,17 @@ export default function ReferringDoctors() {
 
       {/* Modal إضافة/تعديل دكتور */}
       {editDoctor && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.4)' }}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm" dir="rtl">
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.4)' }}
+          onClick={handleModalBackdropClick(() => setEditDoctor(null), saving)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm" dir="rtl"
+            onKeyDown={e => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); saveDoctor() } }}>
             <h2 className="font-bold text-lg mb-4" style={{ color: 'var(--on-surface)' }}>
               {editDoctor.id ? 'تعديل بيانات الدكتور' : 'إضافة دكتور جديد'}
             </h2>
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>اسم الدكتور *</label>
-                <input type="text" value={editDoctor.name || ''}
+                <input ref={nameInputRef} type="text" value={editDoctor.name || ''}
                   onChange={e => setEditDoctor(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="لازم يطابق الاسم المكتوب في بيانات المرضى بالظبط"
                   className="w-full px-3 py-2 rounded-lg outline-none text-right"
@@ -191,7 +230,7 @@ export default function ReferringDoctors() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1" style={{ color: 'var(--on-surface)' }}>نسبة العمولة %</label>
-                <input type="number" value={editDoctor.commission_percent ?? ''}
+                <input type="number" min="0" step="any" value={editDoctor.commission_percent ?? ''}
                   onChange={e => setEditDoctor(prev => ({ ...prev, commission_percent: e.target.value }))}
                   placeholder="مثال: 10"
                   className="w-full px-3 py-2 rounded-lg outline-none text-right"
@@ -219,12 +258,15 @@ export default function ReferringDoctors() {
             <div className="flex gap-3 mt-5 justify-end">
               <button onClick={() => setEditDoctor(null)} disabled={saving}
                 className="px-4 py-2 rounded-lg text-sm"
-                style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+                style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)', opacity: saving ? 0.6 : 1 }}>
                 إلغاء
               </button>
               <button onClick={saveDoctor} disabled={saving}
-                className="px-4 py-2 rounded-lg text-sm text-white"
+                className="px-4 py-2 rounded-lg text-sm text-white flex items-center gap-2"
                 style={{ background: '#1a2456', opacity: saving ? 0.7 : 1 }}>
+                {saving && (
+                  <span className="animate-spin" style={{ width: '11px', height: '11px', border: '2px solid rgba(255,255,255,0.4)', borderTopColor: 'white', borderRadius: '50%', display: 'inline-block' }} />
+                )}
                 {saving ? 'جاري الحفظ...' : 'حفظ'}
               </button>
             </div>
@@ -234,7 +276,8 @@ export default function ReferringDoctors() {
 
       {/* Modal تأكيد الحذف */}
       {deleteConfirm && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.4)' }}>
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.4)' }}
+          onClick={handleModalBackdropClick(() => setDeleteConfirm(null), deleting)}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm" dir="rtl">
             <h2 className="font-bold text-lg mb-2" style={{ color: '#dc2626' }}>⚠️ تأكيد الحذف</h2>
             <p className="text-sm mb-5" style={{ color: 'var(--on-surface-variant)' }}>
@@ -243,12 +286,15 @@ export default function ReferringDoctors() {
             <div className="flex gap-3 justify-end">
               <button onClick={() => setDeleteConfirm(null)} disabled={deleting}
                 className="px-4 py-2 rounded-lg text-sm"
-                style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+                style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)', opacity: deleting ? 0.6 : 1 }}>
                 إلغاء
               </button>
               <button onClick={deleteDoctor} disabled={deleting}
-                className="px-4 py-2 rounded-lg text-sm text-white"
+                className="px-4 py-2 rounded-lg text-sm text-white flex items-center gap-2"
                 style={{ background: '#dc2626', opacity: deleting ? 0.7 : 1 }}>
+                {deleting && (
+                  <span className="animate-spin" style={{ width: '11px', height: '11px', border: '2px solid rgba(255,255,255,0.4)', borderTopColor: 'white', borderRadius: '50%', display: 'inline-block' }} />
+                )}
                 {deleting ? 'جاري الحذف...' : 'حذف'}
               </button>
             </div>
@@ -257,7 +303,16 @@ export default function ReferringDoctors() {
       )}
 
       {loading ? (
-        <div className="text-center py-10" style={{ color: 'var(--on-surface-variant)' }}>جاري التحميل...</div>
+        <div className="bg-white rounded-xl overflow-hidden" style={{ border: '1px solid var(--outline-variant)' }}>
+          {[1, 2, 3].map(i => (
+            <div key={i} className="p-4 animate-pulse flex items-center gap-4" style={{ borderTop: i > 1 ? '1px solid var(--outline-variant)' : 'none' }}>
+              <div style={{ width: '120px', height: '14px', background: '#f1f3f4', borderRadius: '6px' }} />
+              <div style={{ width: '60px', height: '14px', background: '#f1f3f4', borderRadius: '6px' }} />
+              <div style={{ width: '90px', height: '14px', background: '#f1f3f4', borderRadius: '6px' }} />
+              <div style={{ width: '70px', height: '14px', background: '#f1f3f4', borderRadius: '6px' }} />
+            </div>
+          ))}
+        </div>
       ) : (
         <>
           <div className="bg-white rounded-xl overflow-hidden mb-6" style={{ border: '1px solid var(--outline-variant)' }}>
@@ -279,7 +334,7 @@ export default function ReferringDoctors() {
                 </thead>
                 <tbody>
                   {registeredRows.map(d => (
-                    <tr key={d.id} style={{ borderTop: '1px solid var(--outline-variant)' }}>
+                    <tr key={d.id} className="transition-colors hover:bg-gray-50" style={{ borderTop: '1px solid var(--outline-variant)' }}>
                       <td className="p-3 text-sm font-medium" style={{ color: 'var(--on-surface)' }}>
                         {d.name}
                         {d.is_active === false && (
