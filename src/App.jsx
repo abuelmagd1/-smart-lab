@@ -118,6 +118,7 @@ function App() {
                 <Route path="/statistics" element={<Statistics />} />
                 <Route path="/supplies" element={<Supplies />} />
                 <Route path="/referring-doctors" element={<ReferringDoctors />} />
+                
             
               </Route>
 
