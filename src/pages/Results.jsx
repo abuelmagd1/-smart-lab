@@ -5,6 +5,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import EmptyState from '../components/EmptyState'
 import { useToast } from '../components/Toast'
 import { formatAge } from '../utils/referenceRanges'
+import { calculatePatientRevenue } from '../utils/financeUtils'
 
 const statusStyle = {
   'تم التجميع': { bg: '#f3f4f6', color: '#374151' },
@@ -73,6 +74,45 @@ const openWhatsAppForReadyResult = (patient, label) => {
   const message = 'أهلاً ' + patient.name + '، نتيجة "' + label + '" جاهزة، تقدر تستلمها من المعمل في أي وقت 🙏'
   const link = buildWhatsAppLink(patient.phone, message)
   if (link) window.open(link, '_blank')
+}
+
+// هوية تقريبية للمريض عبر زياراته المختلفة - بنستخدم رقم الموبايل لو موجود (الأدق)،
+// وإلا الاسم (case-insensitive) كـ fallback. مفيش ID شخص موحّد في قاعدة البيانات حاليًا،
+// كل صف "patient" بيمثل زيارة، فده أفضل تقريب ممكن من غير تغيير في البنية
+const getPatientIdentity = (p) => {
+  const phone = (p.phone || '').replace(/[^\d]/g, '')
+  if (phone) return 'phone:' + phone
+  const name = (p.name || '').trim().toLowerCase()
+  return name ? 'name:' + name : null
+}
+
+// بيدوّر على آخر نتيجة سابقة لنفس التحليل عند نفس المريض (بزيارة أقدم) - عشان نعرض
+// المقارنة "كان كذا، بقى كذا" من غير أي تعديل في قاعدة البيانات، بس بمطابقة البيانات
+// اللي أصلاً متجابة في نفس الصفحة
+const getPreviousResult = (allPatients, currentPatient, testName) => {
+  const identity = getPatientIdentity(currentPatient)
+  if (!identity) return null
+  const candidates = allPatients.filter(p =>
+    p.id !== currentPatient.id &&
+    getPatientIdentity(p) === identity &&
+    new Date(p.created_at) < new Date(currentPatient.created_at)
+  )
+  candidates.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  for (const c of candidates) {
+    const match = (c.tests || []).find(t => t.name === testName && t.value)
+    if (match) return { value: match.value, date: c.created_at }
+  }
+  return null
+}
+
+// سهم بسيط يوضح اتجاه التغيير بين نتيجة قديمة وجديدة (لو الاتنين أرقام قابلة للمقارنة)
+const trendArrow = (prevValue, currentValue) => {
+  const prevNum = parseFloat(String(prevValue).replace(',', '.'))
+  const curNum = parseFloat(String(currentValue).replace(',', '.'))
+  if (isNaN(prevNum) || isNaN(curNum)) return ''
+  if (curNum > prevNum) return ' ▲'
+  if (curNum < prevNum) return ' ▼'
+  return ' ='
 }
 
 const getBucket = (dateStr) => {
@@ -349,6 +389,30 @@ export default function Results() {
     window.open(link, '_blank')
   }
 
+  // بيبعت تذكير واتساب بالمبلغ المتبقي - بيحسب التكلفة الفعلية للزيارة دي بس (مش كل زياراته)
+  const sendUnpaidReminder = (patient) => {
+    if (!patient.phone) {
+      showToast('مفيش رقم موبايل مسجّل للمريض ده', 'warning')
+      return
+    }
+    const cost = calculatePatientRevenue(patient)
+    const message = 'أهلاً ' + patient.name + '، تذكير بسيط إن فيه مبلغ متبقي ' + cost.toLocaleString('ar-EG') +
+      ' جنيه من زيارتك بتاريخ ' + new Date(patient.created_at).toLocaleDateString('ar-EG') + '، تقدر تسددها وقت ما يكون مناسب ليك 🙏'
+    const link = buildWhatsAppLink(patient.phone, message)
+    window.open(link, '_blank')
+  }
+
+  // بينسخ رابط بوابة المريض (لو الكود متسجل) - المريض يقدر يفتحه يشوف نتيجته بنفسه من غير ما يتصل يسأل
+  const copyPortalLink = (patient) => {
+    if (!patient.portal_code) {
+      showToast('الرابط ده مش متاح للمرضى القدامى قبل تفعيل البوابة، سجّل مريض جديد عشان يتولّد له رابط', 'warning', 6000)
+      return
+    }
+    const link = window.location.origin + '/portal/' + patient.portal_code
+    navigator.clipboard?.writeText(link)
+    showToast('✅ اتنسخ رابط متابعة النتيجة، ابعته للمريض', 'success')
+  }
+
   const togglePaid = async (patient) => {
     const newPaid = !patient.paid
     const { error } = await supabase.from('patients').update({ paid: newPaid }).eq('id', patient.id)
@@ -612,6 +676,18 @@ export default function Results() {
                       style={p.paid ? { background: '#d1fae5', color: '#065f46' } : { background: '#fee2e2', color: '#991b1b' }}>
                       {p.paid ? '✅ مدفوع' : '⏳ غير مدفوع'}
                     </button>
+                    {!p.paid && (
+                      <button onClick={e => { e.stopPropagation(); sendUnpaidReminder(p) }}
+                        className="px-3 py-1 rounded-lg text-xs font-medium"
+                        style={{ background: '#fef3c7', color: '#92400e' }}>
+                        📤 تذكير بالمتبقي
+                      </button>
+                    )}
+                    <button onClick={e => { e.stopPropagation(); copyPortalLink(p) }}
+                      className="px-3 py-1 rounded-lg text-xs font-medium"
+                      style={{ background: '#e0e7ff', color: '#3730a3' }}>
+                      🔗 رابط المتابعة
+                    </button>
                     <button onClick={e => { e.stopPropagation(); sendWhatsApp(p) }}
                       className="px-3 py-1 rounded-lg text-xs font-medium"
                       style={{ background: '#d1fae5', color: '#065f46' }}>
@@ -786,6 +862,15 @@ export default function Results() {
                                     className="px-3 py-1 rounded-lg outline-none text-right w-full"
                                     style={{ border: isCritical ? '1.5px solid #dc2626' : '1px solid var(--outline-variant)', fontSize: '13px' }}
                                   />
+                                  {(() => {
+                                    const prev = getPreviousResult(patients, p, t.name)
+                                    if (!prev) return null
+                                    return (
+                                      <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)' }}>
+                                        📈 كانت {prev.value} في {new Date(prev.date).toLocaleDateString('ar-EG')}{trendArrow(prev.value, currentValue)}
+                                      </p>
+                                    )
+                                  })()}
                                 </td>
                                 <td className="p-3">
                                   <select defaultValue={t.status || 'تم التجميع'}

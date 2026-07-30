@@ -258,11 +258,24 @@ export default function NewPatient() {
         <div className="mb-4 p-4 rounded-xl text-sm font-medium flex items-center justify-between flex-wrap gap-3" style={{ background: '#d1fae5', color: '#065f46' }}>
           <span>✅ تم حفظ بيانات المريض بنجاح!</span>
           {lastPatient && (
-            <button onClick={() => setShowBarcode(true)}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium text-white"
-              style={{ background: '#065f46' }}>
-              🏷️ طباعة باركود العينة
-            </button>
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => setShowBarcode(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-white"
+                style={{ background: '#065f46' }}>
+                🏷️ طباعة باركود العينة
+              </button>
+              {lastPatient.portal_code && (
+                <button onClick={() => {
+                  const link = window.location.origin + '/portal/' + lastPatient.portal_code
+                  navigator.clipboard?.writeText(link)
+                  showToast('✅ اتنسخ رابط متابعة النتيجة، ابعته للمريض', 'success')
+                }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                  style={{ background: 'white', color: '#065f46' }}>
+                  🔗 نسخ رابط متابعة النتيجة
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}

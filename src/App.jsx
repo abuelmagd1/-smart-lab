@@ -7,6 +7,7 @@ import NetworkStatusWatcher from './components/NetworkStatusWatcher'
 import SessionWatcher from './components/SessionWatcher'
 import ReferringDoctors from './pages/ReferringDoctors'
 import Supplies from './pages/Supplies'
+import PatientPortal from './pages/PatientPortal'
 
 
 const Login = lazy(() => import('./pages/Login'))
@@ -107,7 +108,7 @@ function App() {
             <Routes>
               <Route path="/login" element={!session ? <Login /> : <Navigate to={role === 'admin' ? '/admin' : '/dashboard'} />} />
               <Route path="/" element={<Navigate to={!session ? '/login' : role === 'admin' ? '/admin' : '/dashboard'} />} />
-
+              <Route path="/portal/:code" element={<PatientPortal />} />
               <Route element={session && role === 'doctor' ? <Layout /> : <Navigate to="/login" />}>
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/new-patient" element={<NewPatient />} />
