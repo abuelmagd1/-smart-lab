@@ -60,7 +60,32 @@ const DEFAULT_DESIGN = {
   // الباقات والتاريخ
   report_show_history: true,
   report_show_trend_charts: true,
+  // بيانات المريض - إظهار/إخفاء كل حقل لوحده
+  report_show_patient_name: true,
+  report_show_print_date: true,
+  report_show_sex_age: true,
+  report_show_visit_date: true,
+  report_show_referred_by: true,
+  // النصوص والتسميات الثابتة
+  report_doctor_prefix: 'Dr.',
+  report_stamp_text: 'ختم المعمل',
+  report_barcode_label: 'PATIENT ID',
+  report_panel_title: 'COMPLETE BLOOD COUNT',
+  report_history_title: 'Patient History In Our Lab',
+  report_show_bullets: true,
+  // الأبعاد والحواف
+  report_table_header_bg: '#f0f0f0',
+  report_divider_color: '#cccccc',
+  report_border_radius: '6',
+  report_page_margin: '8',
 }
+
+// أعمدة أساسية شبه مؤكد إنها موجودة في lab_settings من قبل ميزة التصميم الموسّعة دي -
+// بتستخدم كخط دفاع أخير في saveDesign لو المستخدم لسه معملوش حفظ قبل كده أصلاً
+const ROUND1_DESIGN_KEYS = [
+  'report_header_color', 'report_table_color', 'report_font_size', 'report_table_text_color',
+  'report_result_normal_color', 'report_result_high_color', 'report_result_low_color', 'report_barcode_color',
+]
 
 const HISTORY_COLUMNS = [
   { key: 'WBCs - Total', label: 'WBCs' },
@@ -198,13 +223,19 @@ export default function Reports() {
   const fetchHistory = async (patient) => {
     if (!patient.phone) { setHistoryRows([]); return }
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('patients')
       .select('id, created_at, tests(*)')
       .eq('phone', patient.phone)
       .neq('id', patient.id)
       .order('created_at', { ascending: false })
       .limit(5)
+
+    if (error) {
+      showToast('حصل خطأ أثناء تحميل تاريخ زيارات المريض: ' + error.message, 'error', 5000)
+      setHistoryRows([])
+      return
+    }
 
     const rows = []
     const list = data || []
@@ -227,19 +258,36 @@ export default function Reports() {
       showToast('لازم تسجّل الدخول الأول عشان تحفظ التصميم', 'warning', 4000)
       return
     }
-    const { error } = await supabase.from('lab_settings').upsert({ user_id: user.id, ...design }, { onConflict: 'user_id' })
+
+    let { error } = await supabase.from('lab_settings').upsert({ user_id: user.id, ...design }, { onConflict: 'user_id' })
+    let partialSave = false
+
+    // لو فيه أعمدة جديدة لسه مش موجودة في قاعدة البيانات، منسيبش الحفظ يفشل بالكامل -
+    // بنحاول تاني ونحفظ بس الأعمدة اللي فعلاً موجودة (المعروفة من أول تحميل للإعدادات)
+    if (error && (error.message?.includes('does not exist') || error.code === '42703' || error.code === 'PGRST204')) {
+      const knownKeys = settings ? Object.keys(settings) : []
+      const fallbackKeys = knownKeys.length > 0 ? knownKeys : ROUND1_DESIGN_KEYS
+      const safeDesign = {}
+      Object.keys(design).forEach(key => {
+        if (fallbackKeys.includes(key)) safeDesign[key] = design[key]
+      })
+      const retry = await supabase.from('lab_settings').upsert({ user_id: user.id, ...safeDesign }, { onConflict: 'user_id' })
+      error = retry.error
+      if (!error) partialSave = true
+    }
+
     setSavingDesign(false)
     if (error) {
-      if (error.message?.includes('does not exist') || error.code === '42703' || error.code === 'PGRST204') {
-        showToast('لازم تضيف أعمدة جديدة لجدول lab_settings في Supabase الأول عشان تحفظ إعدادات التصميم الجديدة (اسأل المطوّر يشغّل كود الترحيل SQL المرفق)', 'error', 9000)
-      } else {
-        showToast('حصل خطأ أثناء حفظ التصميم: ' + error.message, 'error', 5000)
-      }
+      showToast('حصل خطأ أثناء حفظ التصميم: ' + error.message, 'error', 5000)
       return
     }
     setSettings(prev => ({ ...prev, ...design }))
-    setDesignSaved(true)
-    setTimeout(() => setDesignSaved(false), 2000)
+    if (partialSave) {
+      showToast('💾 اتحفظت الإعدادات المتاحة بس. عشان تحفظ باقي إعدادات التصميم الجديدة، لازم تشغّل كود الترحيل SQL المرفق في Supabase الأول', 'warning', 9000)
+    } else {
+      setDesignSaved(true)
+      setTimeout(() => setDesignSaved(false), 2000)
+    }
   }
 
   const filtered = patients
@@ -1358,7 +1406,7 @@ export default function Reports() {
 
           <div className="w-full lg:flex-1 order-1 lg:order-3 bg-white rounded-xl overflow-hidden overflow-x-auto" style={{ border: '1px solid var(--outline-variant)' }}>
             {settings ? (
-              <div ref={previewRef} dir="ltr">
+              <div ref={previewRef}>
                 <PreviewReport patient={selectedPatient} />
               </div>
             ) : (
