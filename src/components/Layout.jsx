@@ -7,6 +7,7 @@ const navItems = [
   { label: 'لوحة التحكم', icon: '📊', path: '/dashboard' },
   { label: 'مريض جديد', icon: '➕', path: '/new-patient' },
   { label: 'زيارة جديدة لمريض موجود', icon: '🔁', path: '/existing-patient' },
+  { label: 'سجلات المرضى', icon: '🗂️', path: '/patient-records' },
   { label: 'نتائج التحاليل', icon: '🔬', path: '/results' },
   { label: 'المساعد الذكي', icon: '🤖', path: '/ai-assistant' },
   { label: 'التقارير', icon: '📄', path: '/reports' },

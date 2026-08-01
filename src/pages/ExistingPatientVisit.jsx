@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { supabase } from '../supabase'
 import BarcodeLabel from '../components/BarcodeLabel'
 import ProfileQRCode from '../components/ProfileQRCode'
@@ -8,6 +9,7 @@ import { getReferenceRange, ageToApproxDays } from '../utils/referenceRanges'
 
 export default function ExistingPatientVisit() {
   const showToast = useToast()
+  const location = useLocation()
 
   // خطوة 1: البحث عن المريض واختياره
   const [profileSearch, setProfileSearch] = useState('')
@@ -37,6 +39,20 @@ export default function ExistingPatientVisit() {
   useUnsavedChanges(!!(selectedProfile && (selectedTests.length > 0 || selectedPanels.length > 0)))
 
   useEffect(() => { fetchTests(); fetchPanels() }, [])
+
+  useEffect(() => {
+    const targetId = location.state?.autoSelectProfileId
+    if (!targetId) return
+    supabase.from('patient_profiles').select('*').eq('id', targetId).maybeSingle()
+      .then(({ data, error }) => {
+        if (error) {
+          showToast('حصل خطأ أثناء تحميل بيانات المريض: ' + error.message, 'error', 5000)
+          return
+        }
+        if (data) selectProfile(data)
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   // بحث فوري (مع تأخير بسيط) عن ملفات المرضى بالاسم أو رقم الهاتف
   useEffect(() => {

@@ -15,6 +15,7 @@ const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const NewPatient = lazy(() => import('./pages/NewPatient'))
 const ExistingPatientVisit = lazy(() => import('./pages/ExistingPatientVisit'))
+const PatientRecords = lazy(() => import('./pages/PatientRecords'))
 const Results = lazy(() => import('./pages/Results'))
 const AIAssistant = lazy(() => import('./pages/AIAssistant'))
 const Reports = lazy(() => import('./pages/Reports'))
@@ -116,6 +117,7 @@ function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/new-patient" element={<NewPatient />} />
                 <Route path="/existing-patient" element={<ExistingPatientVisit />} />
+                <Route path="/patient-records" element={<PatientRecords />} />
                 <Route path="/results" element={<Results />} />
                 <Route path="/ai-assistant" element={<AIAssistant />} />
                 <Route path="/reports" element={<Reports />} />
