@@ -8,11 +8,13 @@ import SessionWatcher from './components/SessionWatcher'
 import ReferringDoctors from './pages/ReferringDoctors'
 import Supplies from './pages/Supplies'
 import PatientPortal from './pages/PatientPortal'
+import RecordPortal from './pages/RecordPortal'
 
 
 const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const NewPatient = lazy(() => import('./pages/NewPatient'))
+const ExistingPatientVisit = lazy(() => import('./pages/ExistingPatientVisit'))
 const Results = lazy(() => import('./pages/Results'))
 const AIAssistant = lazy(() => import('./pages/AIAssistant'))
 const Reports = lazy(() => import('./pages/Reports'))
@@ -109,9 +111,11 @@ function App() {
               <Route path="/login" element={!session ? <Login /> : <Navigate to={role === 'admin' ? '/admin' : '/dashboard'} />} />
               <Route path="/" element={<Navigate to={!session ? '/login' : role === 'admin' ? '/admin' : '/dashboard'} />} />
               <Route path="/portal/:code" element={<PatientPortal />} />
+              <Route path="/my-record/:code" element={<RecordPortal />} />
               <Route element={session && role === 'doctor' ? <Layout /> : <Navigate to="/login" />}>
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/new-patient" element={<NewPatient />} />
+                <Route path="/existing-patient" element={<ExistingPatientVisit />} />
                 <Route path="/results" element={<Results />} />
                 <Route path="/ai-assistant" element={<AIAssistant />} />
                 <Route path="/reports" element={<Reports />} />

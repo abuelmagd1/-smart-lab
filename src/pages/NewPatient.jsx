@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import BarcodeLabel from '../components/BarcodeLabel'
+import ProfileQRCode from '../components/ProfileQRCode'
 import { useToast } from '../components/Toast'
 import useUnsavedChanges from '../hooks/useUnsavedChanges'
 import { getReferenceRange, ageToApproxDays } from '../utils/referenceRanges'
@@ -19,7 +20,9 @@ export default function NewPatient() {
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [success, setSuccess] = useState(false)
   const [lastPatient, setLastPatient] = useState(null)
+  const [lastProfile, setLastProfile] = useState(null)
   const [showBarcode, setShowBarcode] = useState(false)
+  const [showQRCode, setShowQRCode] = useState(false)
   const [editingTest, setEditingTest] = useState(null)
   const [editingPanel, setEditingPanel] = useState(null)
   const [savingEdit, setSavingEdit] = useState(false)
@@ -153,9 +156,31 @@ export default function NewPatient() {
       ? Math.floor((new Date() - new Date(form.birth_date)) / (1000 * 60 * 60 * 24))
       : ageToApproxDays(ageNum, form.ageUnit)
 
+    // 1) بننشئ ملف المريض الثابت الأول - ده اللي هيفضل موجود ويتربط بيه كل زيارة جاية
+    // للمريض ده، وليه رابط بوابة دائم منفصل عن باركود العينة بتاع الزيارة
+    const { data: profile, error: profileError } = await supabase
+      .from('patient_profiles')
+      .insert([{
+        name: form.name,
+        age: ageNum,
+        age_unit: form.ageUnit,
+        gender: form.gender,
+        phone: form.phone,
+        birth_date: form.birth_date || null,
+      }])
+      .select().single()
+
+    if (profileError) {
+      showToast('حدث خطأ أثناء إنشاء ملف المريض: ' + profileError.message, 'error')
+      setLoading(false)
+      return
+    }
+
+    // 2) بننشئ "الزيارة" نفسها (نفس جدول patients الأصلي)، مربوطة بملف المريض
     const { data: patient, error } = await supabase
       .from('patients')
       .insert([{
+        profile_id: profile.id,
         name: form.name,
         age: ageNum,
         age_unit: form.ageUnit,
@@ -168,7 +193,7 @@ export default function NewPatient() {
       .select().single()
 
     if (error) {
-      showToast('حدث خطأ أثناء حفظ بيانات المريض: ' + error.message, 'error')
+      showToast('تم إنشاء ملف المريض، لكن حصل خطأ أثناء حفظ بيانات الزيارة: ' + error.message, 'error')
       setLoading(false)
       return
     }
@@ -240,6 +265,7 @@ export default function NewPatient() {
     setLoading(false)
     setSuccess(true)
     setLastPatient(patient)
+    setLastProfile(profile)
     showToast(`تم تسجيل المريض "${form.name}" بنجاح`, 'success')
     setForm({ name: '', phone: '', age: '', ageUnit: 'Years', birth_date: '', gender: '', doctor: '', notes: '' })
     setSelectedTests([])
@@ -264,16 +290,23 @@ export default function NewPatient() {
                 style={{ background: '#065f46' }}>
                 🏷️ طباعة باركود العينة
               </button>
-              {lastPatient.portal_code && (
-                <button onClick={() => {
-                  const link = window.location.origin + '/portal/' + lastPatient.portal_code
-                  navigator.clipboard?.writeText(link)
-                  showToast('✅ اتنسخ رابط متابعة النتيجة، ابعته للمريض', 'success')
-                }}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium"
-                  style={{ background: 'white', color: '#065f46' }}>
-                  🔗 نسخ رابط متابعة النتيجة
-                </button>
+              {lastProfile?.portal_code && (
+                <>
+                  <button onClick={() => setShowQRCode(true)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                    style={{ background: 'white', color: '#065f46' }}>
+                    📱 طباعة QR كود سجل المريض
+                  </button>
+                  <button onClick={() => {
+                    const link = window.location.origin + '/my-record/' + lastProfile.portal_code
+                    navigator.clipboard?.writeText(link)
+                    showToast('✅ اتنسخ رابط سجل المريض (ثابت لكل زياراته الجاية)', 'success')
+                  }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                    style={{ background: 'white', color: '#065f46' }}>
+                    🔗 نسخ رابط سجل المريض
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -282,6 +315,10 @@ export default function NewPatient() {
 
       {showBarcode && (
         <BarcodeLabel patient={lastPatient} onClose={() => setShowBarcode(false)} />
+      )}
+
+      {showQRCode && (
+        <ProfileQRCode profile={lastProfile} onClose={() => setShowQRCode(false)} />
       )}
 
       {/* مودال تعديل تحليل مفرد */}

@@ -9,6 +9,7 @@ import { summarizeFinances, buildFinancialReportHTML, getSimpleRange } from '../
 // عشان محدش يقدر يشوفه من المتصفح تاني
 
 const TEXT_MODEL = 'gemini-3.5-flash'
+const FALLBACK_TEXT_MODEL = 'gemini-2.5-flash' // احتياطي لو الموديل الأساسي كان مشغول (overloaded)
 const INTERACTIONS_PATH = '/v1/interactions'
 
 const TTS_MODEL = 'gemini-3.1-flash-tts-preview'
