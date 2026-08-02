@@ -6,6 +6,7 @@ export const getBarcodeCode = (patient) => String(patient?.barcode_seq || 0).pad
 
 export default function BarcodeLabel({ patient, onClose }) {
   const canvasRef = useRef(null)
+  const printFrameRef = useRef(null)
 
   useEffect(() => {
     if (canvasRef.current && patient) {
@@ -20,40 +21,47 @@ export default function BarcodeLabel({ patient, onClose }) {
     }
   }, [patient])
 
-const printLabel = () => {
-  if (!canvasRef.current || !patient) return
-  const dataUrl = canvasRef.current.toDataURL('image/png')
-  const win = window.open('', '_blank')
-  win.document.write(`
-    <html dir="rtl">
-    <head>
-      <title>باركود العينة - ${patient.name}</title>
-      <meta charset="UTF-8">
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 80mm; height: 40mm; overflow: hidden; }
-        body { font-family: Arial, sans-serif; display: flex; align-items: center; justify-content: center; }
-        .label { text-align: center; border: 1px solid #000; padding: 4px 8px; width: 78mm; height: 38mm; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-        .label img { width: 70mm; height: 20mm; object-fit: contain; }
-        .label p { margin: 2px 0; font-size: 11px; line-height: 1.3; }
-        @media print {
-          @page { margin: 0; size: 80mm 40mm; }
-          html, body { width: 80mm; height: 40mm; }
-        }
-      </style>
-    </head>
-    <body>
-      <div class="label">
-        <p><strong>${patient.name}</strong></p>
-        <p>${patient.age} سنة • ${patient.gender}</p>
-        <img src="${dataUrl}" />
-      </div>
-    </body>
-    </html>
-  `)
-  win.document.close()
-  setTimeout(() => win.print(), 500)
-}
+  // بنستخدم إطار مخفي في نفس الصفحة بدل ما نفتح تاب جديد (window.open) - فتح تاب جديد
+  // للطباعة كان بيسبب تعليق التطبيق لما ترجع له بعد الطباعة في بعض المتصفحات، والطريقة
+  // دي (زي المستخدمة في صفحة التقارير) أضمن ومش بتفتح أي نافذة/تاب خالص
+  const printLabel = () => {
+    if (!canvasRef.current || !patient) return
+    const dataUrl = canvasRef.current.toDataURL('image/png')
+
+    const html = `
+      <html dir="rtl">
+      <head>
+        <title>باركود العينة - ${patient.name}</title>
+        <meta charset="UTF-8">
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          html, body { width: 80mm; height: 40mm; overflow: hidden; }
+          body { font-family: Arial, sans-serif; display: flex; align-items: center; justify-content: center; }
+          .label { text-align: center; border: 1px solid #000; padding: 4px 8px; width: 78mm; height: 38mm; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+          .label img { width: 70mm; height: 20mm; object-fit: contain; }
+          .label p { margin: 2px 0; font-size: 11px; line-height: 1.3; }
+          @media print {
+            @page { margin: 0; size: 80mm 40mm; }
+            html, body { width: 80mm; height: 40mm; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="label">
+          <p><strong>${patient.name}</strong></p>
+          <p>${patient.age} سنة • ${patient.gender}</p>
+          <img src="${dataUrl}" />
+        </div>
+      </body>
+      </html>
+    `
+
+    const frame = printFrameRef.current
+    frame.srcdoc = html
+    frame.onload = () => {
+      setTimeout(() => { frame.contentWindow.print() }, 300)
+    }
+  }
 
   if (!patient) return null
 
@@ -64,6 +72,7 @@ const printLabel = () => {
     onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     dir="rtl"
   >
+    <iframe ref={printFrameRef} style={{ display: 'none' }} title="barcode-print-frame" />
     <div 
       className="bg-white rounded-2xl p-6 w-full max-w-sm text-center"
       style={{ zIndex: 10000, position: 'relative' }}

@@ -7,6 +7,7 @@ export const getRecordPortalLink = (profile) =>
 
 export default function ProfileQRCode({ profile, onClose }) {
   const canvasRef = useRef(null)
+  const printFrameRef = useRef(null)
   const [error, setError] = useState(false)
   const link = getRecordPortalLink(profile)
 
@@ -17,11 +18,14 @@ export default function ProfileQRCode({ profile, onClose }) {
     }
   }, [link])
 
+  // بنستخدم إطار مخفي في نفس الصفحة بدل ما نفتح تاب جديد (window.open) - فتح تاب جديد
+  // للطباعة كان بيسبب تعليق التطبيق لما ترجع له بعد الطباعة في بعض المتصفحات، والطريقة
+  // دي (زي المستخدمة في صفحة التقارير) أضمن ومش بتفتح أي نافذة/تاب خالص
   const printQRCode = () => {
     if (!canvasRef.current || !profile) return
     const dataUrl = canvasRef.current.toDataURL('image/png')
-    const win = window.open('', '_blank')
-    win.document.write(`
+
+    const html = `
       <html dir="rtl">
       <head>
         <title>سجل المريض - ${profile.name}</title>
@@ -48,9 +52,13 @@ export default function ProfileQRCode({ profile, onClose }) {
         </div>
       </body>
       </html>
-    `)
-    win.document.close()
-    setTimeout(() => win.print(), 500)
+    `
+
+    const frame = printFrameRef.current
+    frame.srcdoc = html
+    frame.onload = () => {
+      setTimeout(() => { frame.contentWindow.print() }, 300)
+    }
   }
 
   if (!profile) return null
@@ -62,6 +70,7 @@ export default function ProfileQRCode({ profile, onClose }) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       dir="rtl"
     >
+      <iframe ref={printFrameRef} style={{ display: 'none' }} title="qr-print-frame" />
       <div
         className="bg-white rounded-2xl p-6 w-full max-w-sm text-center"
         style={{ zIndex: 10000, position: 'relative' }}

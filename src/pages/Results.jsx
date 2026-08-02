@@ -27,8 +27,6 @@ const periodFilters = [
   { key: 'older', label: 'قبل ذلك' },
 ]
 
-// قائمة القيم الحرجة (Panic/Critical Values) لأشهر التحاليل - بمطابقة جزئية غير حساسة لحالة الأحرف على اسم التحليل.
-// أي قيمة أعلى من high أو أقل من low بتتحسب "حرجة" وتحتاج تنبيه فوري للدكتور، مش مجرد "مرتفع/منخفض" عادي.
 const CRITICAL_RANGES = [
   { keys: ['glucose', 'fbs', 'جلوكوز', 'سكر'], low: 40, high: 500 },
   { keys: ['potassium', 'بوتاسيوم'], low: 2.5, high: 6.5 },
@@ -58,17 +56,14 @@ const CriticalBadge = () => (
   </span>
 )
 
-// بيبني رابط واتساب مجاني (wa.me) برسالة جاهزة - من غير أي API مدفوع، بيفتح واتساب المتصفح/الموبايل عادي
 const buildWhatsAppLink = (phone, message) => {
   if (!phone) return null
   let clean = phone.replace(/[^\d]/g, '')
-  if (clean.startsWith('0')) clean = '2' + clean // 01012345678 -> 201012345678
+  if (clean.startsWith('0')) clean = '2' + clean
   else if (!clean.startsWith('2')) clean = '2' + clean
   return 'https://wa.me/' + clean + '?text=' + encodeURIComponent(message)
 }
 
-// بيفتح واتساب برسالة جاهزة تخص تحليل/باقة معينة بقت جاهزة - بيتستخدم من زرار الـ toast
-// اللي بيظهر تلقائي بعد اعتماد النتيجة، مش بيفتح لوحده من غير ضغطة عشان المتصفح ميحجبوش كـ pop-up
 const openWhatsAppForReadyResult = (patient, label) => {
   if (!patient?.phone) return
   const message = 'أهلاً ' + patient.name + '، نتيجة "' + label + '" جاهزة، تقدر تستلمها من المعمل في أي وقت 🙏'
@@ -76,9 +71,6 @@ const openWhatsAppForReadyResult = (patient, label) => {
   if (link) window.open(link, '_blank')
 }
 
-// هوية تقريبية للمريض عبر زياراته المختلفة - بنستخدم رقم الموبايل لو موجود (الأدق)،
-// وإلا الاسم (case-insensitive) كـ fallback. مفيش ID شخص موحّد في قاعدة البيانات حاليًا،
-// كل صف "patient" بيمثل زيارة، فده أفضل تقريب ممكن من غير تغيير في البنية
 const getPatientIdentity = (p) => {
   const phone = (p.phone || '').replace(/[^\d]/g, '')
   if (phone) return 'phone:' + phone
@@ -86,9 +78,6 @@ const getPatientIdentity = (p) => {
   return name ? 'name:' + name : null
 }
 
-// بيدوّر على آخر نتيجة سابقة لنفس التحليل عند نفس المريض (بزيارة أقدم) - عشان نعرض
-// المقارنة "كان كذا، بقى كذا" من غير أي تعديل في قاعدة البيانات، بس بمطابقة البيانات
-// اللي أصلاً متجابة في نفس الصفحة
 const getPreviousResult = (allPatients, currentPatient, testName) => {
   const identity = getPatientIdentity(currentPatient)
   if (!identity) return null
@@ -105,7 +94,6 @@ const getPreviousResult = (allPatients, currentPatient, testName) => {
   return null
 }
 
-// سهم بسيط يوضح اتجاه التغيير بين نتيجة قديمة وجديدة (لو الاتنين أرقام قابلة للمقارنة)
 const trendArrow = (prevValue, currentValue) => {
   const prevNum = parseFloat(String(prevValue).replace(',', '.'))
   const curNum = parseFloat(String(currentValue).replace(',', '.'))
@@ -163,7 +151,6 @@ const splitTests = (patient) => {
   return { singleTests, panelGroups }
 }
 
-// بيدوّر على أول تحليل حرج جوه بيانات المريض كله (مفرد أو باقة) عشان نعرض تنبيه في رأس بطاقة المريض
 const findCriticalTest = (patient) => {
   const { singleTests, panelGroups } = splitTests(patient)
   const critical = singleTests.find(t => checkCritical(t.name, t.value))
@@ -389,7 +376,6 @@ export default function Results() {
     window.open(link, '_blank')
   }
 
-  // بيبعت تذكير واتساب بالمبلغ المتبقي - بيحسب التكلفة الفعلية للزيارة دي بس (مش كل زياراته)
   const sendUnpaidReminder = (patient) => {
     if (!patient.phone) {
       showToast('مفيش رقم موبايل مسجّل للمريض ده', 'warning')
@@ -400,17 +386,6 @@ export default function Results() {
       ' جنيه من زيارتك بتاريخ ' + new Date(patient.created_at).toLocaleDateString('ar-EG') + '، تقدر تسددها وقت ما يكون مناسب ليك 🙏'
     const link = buildWhatsAppLink(patient.phone, message)
     window.open(link, '_blank')
-  }
-
-  // بينسخ رابط بوابة المريض (لو الكود متسجل) - المريض يقدر يفتحه يشوف نتيجته بنفسه من غير ما يتصل يسأل
-  const copyPortalLink = (patient) => {
-    if (!patient.portal_code) {
-      showToast('الرابط ده مش متاح للمرضى القدامى قبل تفعيل البوابة، سجّل مريض جديد عشان يتولّد له رابط', 'warning', 6000)
-      return
-    }
-    const link = window.location.origin + '/portal/' + patient.portal_code
-    navigator.clipboard?.writeText(link)
-    showToast('✅ اتنسخ رابط متابعة النتيجة، ابعته للمريض', 'success')
   }
 
   const togglePaid = async (patient) => {
@@ -683,11 +658,6 @@ export default function Results() {
                         📤 تذكير بالمتبقي
                       </button>
                     )}
-                    <button onClick={e => { e.stopPropagation(); copyPortalLink(p) }}
-                      className="px-3 py-1 rounded-lg text-xs font-medium"
-                      style={{ background: '#e0e7ff', color: '#3730a3' }}>
-                      🔗 رابط المتابعة
-                    </button>
                     <button onClick={e => { e.stopPropagation(); sendWhatsApp(p) }}
                       className="px-3 py-1 rounded-lg text-xs font-medium"
                       style={{ background: '#d1fae5', color: '#065f46' }}>
