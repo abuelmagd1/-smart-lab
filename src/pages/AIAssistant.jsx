@@ -8,8 +8,8 @@ import { summarizeFinances, buildFinancialReportHTML, getSimpleRange } from '../
 // المفتاح اتشال من هنا خالص - بقى محفوظ سيرفر-سايد بس جوه Supabase Edge Function (gemini-proxy)
 // عشان محدش يقدر يشوفه من المتصفح تاني
 
-const TEXT_MODEL = 'gemini-3.5-flash'
-const FALLBACK_TEXT_MODEL = 'gemini-2.5-flash' // احتياطي لو الموديل الأساسي كان مشغول (overloaded)
+// سلسلة موديلات احتياطية - لو أي موديل مشغول (overloaded) بيجرب اللي بعده تلقائيًا وبالترتيب
+const MODEL_CHAIN = ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
 const INTERACTIONS_PATH = '/v1/interactions'
 
 const TTS_MODEL = 'gemini-3.1-flash-tts-preview'
@@ -433,6 +433,10 @@ const findOfflineAnswer = (userText) => {
   return match ? match.answer : null
 }
 
+// أدوات نتيجتها واضحة بذاتها ومش محتاجة "جولة تانية" مع الموديل عشان يلخصها - بنعرض رسالتها
+// للمستخدم فورًا (إحساس طلب واحد بس)، وده كمان اللي بيمنع أي تعليق ظاهري وانت مشغول بتاب التقرير
+const SKIP_FOLLOWUP_TOOLS = ['generate_financial_report', 'open_patient_report']
+
 const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات (طب، علوم، تاريخ، تكنولوجيا، رياضة، فن، حياة عامة... أي موضوع).\n\n' +
   'شخصيتك:\n' +
   '- بتتكلم بالعربية العامية المصرية البسيطة\n' +
@@ -671,7 +675,7 @@ export default function AIAssistant() {
         contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
       })
       // ⏱️ تشخيص مؤقت لقياس مصدر البطء - هيظهر في Console بس، مش هيأثر على أي حاجة تانية
-      const streamState = { id: null, text: '', startTime: performance.now(), firstTokenAt: null }
+      const streamState = { id: null, text: '', startTime: performance.now(), firstTokenAt: null, flushTimer: null }
       console.log('⏱️ [لابو] بدأ الإرسال: ' + new Date().toLocaleTimeString('ar-EG'))
       await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patients, 0, streamState)
       console.log('⏱️ [لابو] انتهى كل حاجة بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من البداية')
@@ -708,11 +712,13 @@ export default function AIAssistant() {
 
   const stopGeneration = () => { if (abortControllerRef.current) abortControllerRef.current.abort() }
 
-  const runAssistantTurn = async (signal, inputPayload, patients, depth, streamState) => {
+  const runAssistantTurn = async (signal, inputPayload, patients, depth, streamState, modelIndex) => {
     if (depth > 6) return
+    modelIndex = modelIndex || 0
+    const modelToUse = MODEL_CHAIN[modelIndex] || MODEL_CHAIN[MODEL_CHAIN.length - 1]
 
     const body = {
-      model: TEXT_MODEL,
+      model: modelToUse,
       input: inputPayload,
       tools: TOOLS,
       system_instruction: SYSTEM_INSTRUCTION,
@@ -731,7 +737,7 @@ export default function AIAssistant() {
       signal: signal,
       body: JSON.stringify({ path: INTERACTIONS_PATH + '?alt=sse', body: body })
     })
-    console.log('⏱️ [لابو] جولة ' + depth + ': وصلت أول استجابة HTTP بعد ' + ((performance.now() - fetchStartedAt) / 1000).toFixed(1) + ' ثانية (من بداية هذه الجولة، بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من إجمالي البداية)')
+    console.log('⏱️ [لابو] جولة ' + depth + ' (موديل: ' + modelToUse + '): وصلت أول استجابة HTTP بعد ' + ((performance.now() - fetchStartedAt) / 1000).toFixed(1) + ' ثانية (من بداية هذه الجولة، بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من إجمالي البداية)')
 
     if (!response.ok || !response.body) {
       let apiErrorMsg = 'رمز الخطأ: ' + response.status
@@ -739,6 +745,14 @@ export default function AIAssistant() {
         const errData = await response.json()
         if (errData.error && errData.error.message) apiErrorMsg = errData.error.message
       } catch (e) { /* الرد مش JSON، هنكتفي برمز الخطأ */ }
+
+      // لو الموديل الحالي "مشغول" (overloaded)، نجرب اللي بعده في السلسلة تلقائيًا
+      const isOverloaded = /overloaded|high demand|503/i.test(apiErrorMsg) || response.status === 503
+      if (isOverloaded && modelIndex < MODEL_CHAIN.length - 1) {
+        showStatus('🔄 موديل "' + modelToUse + '" مشغول دلوقتي، بيجرب موديل بديل...')
+        return runAssistantTurn(signal, inputPayload, patients, depth, streamState, modelIndex + 1)
+      }
+
       throw new Error('خطأ من Gemini API: ' + apiErrorMsg)
     }
 
@@ -798,11 +812,22 @@ export default function AIAssistant() {
       }
     }
 
+    // نضمن إن آخر جزء من النص المتجمّع اتعرض فعليًا قبل ما نكمل (لو كان لسه مستني الـ 80ms التالية)
+    if (streamState.flushTimer) {
+      clearTimeout(streamState.flushTimer)
+      streamState.flushTimer = null
+      const sid = streamState.id
+      const fullText = streamState.text
+      if (sid) setMessages(function (prev) { return prev.map(function (m) { return m.streamId === sid ? Object.assign({}, m, { content: fullText }) : m }) })
+    }
+
     if (finalInteractionId) historyRef.current.previousId = finalInteractionId
 
     if (finalStatus === 'requires_action' && functionCallOrder.length > 0) {
       console.log('⏱️ [لابو] جولة ' + depth + ': طلب تنفيذ أداة (' + functionCallOrder.map(function (idx) { return functionCallsMap[idx].name }).join(', ') + ') بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من البداية')
       const functionResults = []
+      const executedNames = []
+      let lastVisibleResult = ''
       for (let i = 0; i < functionCallOrder.length; i++) {
         const fc = functionCallsMap[functionCallOrder[i]]
         let args = {}
@@ -814,6 +839,8 @@ export default function AIAssistant() {
           if (err.name === 'AbortError') throw err
           resultText = 'حصل خطأ غير متوقع في تنفيذ هذه العملية: ' + err.message
         }
+        executedNames.push(fc.name)
+        lastVisibleResult = resultText
         functionResults.push({
           type: 'function_result',
           name: fc.name,
@@ -822,7 +849,15 @@ export default function AIAssistant() {
         })
       }
 
-      await runAssistantTurn(signal, functionResults, patients, depth + 1, streamState)
+      // لو كل الأدوات المنفذة نتيجتها واضحة بذاتها، نعرضها فورًا كرد نهائي من غير جولة تانية
+      const allSkippable = executedNames.length > 0 && executedNames.every(function (n) { return SKIP_FOLLOWUP_TOOLS.indexOf(n) !== -1 })
+      if (allSkippable) {
+        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: lastVisibleResult, time: Date.now() }]) })
+        historyRef.current.previousId = null
+        return
+      }
+
+      await runAssistantTurn(signal, functionResults, patients, depth + 1, streamState, modelIndex)
       return
     }
 
@@ -848,14 +883,22 @@ export default function AIAssistant() {
       console.log('⏱️ [لابو] وصل أول حرف من الرد بعد ' + ((streamState.firstTokenAt - streamState.startTime) / 1000).toFixed(1) + ' ثانية من الإرسال')
     }
     streamState.text += chunk
+
     if (!streamState.id) {
       streamState.id = 'stream_' + Date.now() + '_' + Math.random().toString(36).slice(2)
       setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: chunk, time: Date.now(), streamId: streamState.id }]) })
-    } else {
-      const sid = streamState.id
+      return
+    }
+
+    // بنجمّع أكتر من قطعة نص وبنحدّث الواجهة كل ~80ms بدل كل قطعة لوحدها - ده بيقلل التحديثات
+    // اللي كانت بتتكدّس لو التاب مش في الفوكس (زي وقت فتح تاب التقرير) وبتحس إنها "تعليق" لما ترجع
+    const sid = streamState.id
+    if (streamState.flushTimer) return
+    streamState.flushTimer = setTimeout(function () {
+      streamState.flushTimer = null
       const fullText = streamState.text
       setMessages(function (prev) { return prev.map(function (m) { return m.streamId === sid ? Object.assign({}, m, { content: fullText }) : m }) })
-    }
+    }, 80)
   }
 
   const handleToolCall = async (call, signal, patients) => {
@@ -980,7 +1023,7 @@ export default function AIAssistant() {
       try {
         showStatus('🔎 بيبحث في الإنترنت...')
         const res = await callGeminiProxyWithRetry(INTERACTIONS_PATH, {
-          model: TEXT_MODEL,
+          model: MODEL_CHAIN[0],
           input: 'ابحث وجاوب بعربي بسيط بدون جداول أو Markdown: ' + (args.query || ''),
           tools: [{ type: 'google_search' }],
           generation_config: { thinking_level: 'low' }
@@ -1016,12 +1059,16 @@ export default function AIAssistant() {
         const rangeLabel = start.toLocaleDateString('ar-EG') + ' → ' + new Date(end.getTime() - 1).toLocaleDateString('ar-EG')
         const html = buildFinancialReportHTML(summary, { periodLabel: label, rangeLabel })
 
-        const reportWindow = window.open('', '_blank')
+        // Blob URL بدل document.write المباشر - أثبت، وبيفضل شغال حتى لو رجعت للتاب الأساسي بسرعة
+        // (document.write المباشر بيوقف الـ main thread لحظيًا وممكن يحس المستخدم إنه "تعليق")
+        const blob = new Blob([html], { type: 'text/html' })
+        const blobUrl = URL.createObjectURL(blob)
+        const reportWindow = window.open(blobUrl, '_blank')
         if (!reportWindow) {
+          URL.revokeObjectURL(blobUrl)
           return 'المتصفح منع فتح تاب جديد (pop-up). من فضلك اسمح بالنوافذ المنبثقة لهذا الموقع من إعدادات المتصفح وحاول تاني.'
         }
-        reportWindow.document.write(html)
-        reportWindow.document.close()
+        setTimeout(function () { URL.revokeObjectURL(blobUrl) }, 60000)
 
         return 'تم تجهيز التقرير المالي عن "' + label + '" وفتحه في تاب جديد. من فيه، دوس زرار "🖨️ طباعة / حفظ PDF" وفي نافذة الطباعة اختار Save as PDF عشان تحفظه كملف.'
       } catch (err) {
@@ -1146,7 +1193,7 @@ export default function AIAssistant() {
       const base64Audio = await blobToBase64(wavBlob)
 
       const res = await callGeminiProxyWithRetry(INTERACTIONS_PATH, {
-        model: TEXT_MODEL,
+        model: MODEL_CHAIN[0],
         input: [
           {
             type: 'user_input',
