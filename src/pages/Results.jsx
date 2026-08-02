@@ -712,7 +712,8 @@ export default function Results() {
                                 <div className="text-xs font-bold mb-1 px-1" style={{ color: '#1a2456' }}>
                                   ■ {SECTION_LABELS[section] || section}
                                 </div>
-                                <table className="w-full mb-1">
+                                <div className="overflow-x-auto">
+                                <table className="w-full mb-1" style={{ minWidth: '480px' }}>
                                   <tbody>
                                     {items.map(item => {
                                       const isDiff = item.result_type === 'relative_absolute'
@@ -766,6 +767,7 @@ export default function Results() {
                                     })}
                                   </tbody>
                                 </table>
+                                </div>
                               </div>
                             ))}
 
@@ -803,7 +805,8 @@ export default function Results() {
                     })}
 
                     {singleTests.length > 0 && (
-                      <table className="w-full">
+                      <div className="overflow-x-auto">
+                      <table className="w-full" style={{ minWidth: '640px' }}>
                         <thead>
                           <tr style={{ background: '#f1f3f4' }}>
                             <th className="text-right p-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>التحليل</th>
@@ -883,6 +886,7 @@ export default function Results() {
                           })}
                         </tbody>
                       </table>
+                      </div>
                     )}
                   </div>
                 )}

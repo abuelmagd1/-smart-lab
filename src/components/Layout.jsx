@@ -1,4 +1,4 @@
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabase'
 import ErrorBoundary from '../components/ErrorBoundary'
@@ -33,6 +33,7 @@ const getSubscriptionStatus = (expiresAt) => {
 }
 
 export default function Layout() {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
@@ -81,6 +82,9 @@ export default function Layout() {
   useEffect(() => {
     getUser()
   }, [])
+
+  const location = useLocation()
+  useEffect(() => { setSidebarOpen(false) }, [location.pathname])
 
   // تطبيق حجم الخط فور تحميل الصفحة
   useEffect(() => {
@@ -317,8 +321,27 @@ export default function Layout() {
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--surface)' }} dir="rtl">
 
-      <aside className="w-64 bg-white flex flex-col" style={{ borderLeft: '1px solid var(--outline-variant)', minHeight: '100vh' }}>
-        <div className="p-5" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
+      {/* طبقة تعتيم خلف القائمة على الموبايل بس، بتقفلها لو دُست عليها */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 lg:hidden" style={{ background: 'rgba(0,0,0,0.4)', zIndex: 40 }}
+          onClick={() => setSidebarOpen(false)} />
+      )}
+
+      <aside
+        className="w-64 bg-white flex flex-col fixed lg:static inset-y-0 right-0 transition-transform duration-300"
+        style={{
+          borderLeft: '1px solid var(--outline-variant)',
+          minHeight: '100vh',
+          zIndex: 50,
+          transform: sidebarOpen ? 'translateX(0)' : 'translateX(100%)',
+        }}
+      >
+        <style>{`
+          @media (min-width: 1024px) {
+            aside { transform: none !important; position: static !important; }
+          }
+        `}</style>
+        <div className="p-5 flex items-center justify-between" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center text-white text-lg flex-shrink-0"
               style={{ background: 'var(--primary-container)' }}>
@@ -329,9 +352,12 @@ export default function Layout() {
               <p className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>System</p>
             </div>
           </div>
+          <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-xl" aria-label="إغلاق القائمة" style={{ color: 'var(--on-surface-variant)' }}>
+            ✕
+          </button>
         </div>
 
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {navItems.map((item, i) => (
             <NavLink key={i} to={item.path}
               className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all"
@@ -367,9 +393,14 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main className="flex-1">
-        <div className="bg-white px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
-          <h2 className="font-semibold" style={{ color: 'var(--on-surface)' }}>{labName}</h2>
+      <main className="flex-1 min-w-0">
+        <div className="bg-white px-4 sm:px-6 py-4 flex items-center justify-between gap-2" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
+          <div className="flex items-center gap-3 min-w-0">
+            <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-xl flex-shrink-0" aria-label="فتح القائمة" style={{ color: 'var(--on-surface)' }}>
+              ☰
+            </button>
+            <h2 className="font-semibold truncate" style={{ color: 'var(--on-surface)' }}>{labName}</h2>
+          </div>
           <div className="flex items-center gap-3">
 
             {/* الإشعارات - الإدمن فقط */}
@@ -384,7 +415,7 @@ export default function Layout() {
                 )}
               </button>
               {showNotifications && (
-                <div className="absolute left-0 top-10 bg-white rounded-xl shadow-xl z-50 w-80" style={{ border: '1px solid var(--outline-variant)' }} dir="rtl">
+                <div className="absolute left-0 top-10 bg-white rounded-xl shadow-xl z-50 w-80" style={{ border: '1px solid var(--outline-variant)', maxWidth: 'calc(100vw - 32px)' }} dir="rtl">
                   <div className="p-4" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
                     <h3 className="font-semibold text-sm" style={{ color: 'var(--on-surface)' }}>إشعارات الإدارة</h3>
                   </div>
@@ -411,7 +442,7 @@ export default function Layout() {
             <div className="relative" ref={settingsRef}>
               <button onClick={() => { setShowSettings(!showSettings); setShowNotifications(false); setShowProfile(false) }} className="text-xl" aria-label="فتح الإعدادات">⚙️</button>
               {showSettings && (
-                <div className="absolute left-0 top-10 bg-white rounded-xl shadow-xl z-50 w-72" style={{ border: '1px solid var(--outline-variant)' }} dir="rtl">
+                <div className="absolute left-0 top-10 bg-white rounded-xl shadow-xl z-50 w-72" style={{ border: '1px solid var(--outline-variant)', maxWidth: 'calc(100vw - 32px)' }} dir="rtl">
                   <div className="p-4" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
                     <h3 className="font-semibold text-sm" style={{ color: 'var(--on-surface)' }}>الإعدادات</h3>
                   </div>
