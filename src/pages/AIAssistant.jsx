@@ -15,6 +15,105 @@ const INTERACTIONS_PATH = '/v1/interactions'
 const TTS_MODEL = 'gemini-3.1-flash-tts-preview'
 const GENERATE_CONTENT_PATH = '/v1beta/models/' + TTS_MODEL + ':generateContent'
 
+// بيبني صفحة PDF عامة من أي محتوى (نص أو جداول) - تصميم احترافي متناسق مع هوية Smart Lab
+const buildGenericPdfHTML = (title, sections) => {
+  const sectionsHtml = (sections || []).map(function (s, idx) {
+    const delay = (idx * 0.06).toFixed(2)
+    if (s.type === 'table' && s.columns && s.rows) {
+      const headerCells = s.columns.map(function (c) {
+        return '<th>' + c + '</th>'
+      }).join('')
+      const bodyRows = s.rows.map(function (row, ri) {
+        const cells = row.map(function (cell) {
+          return '<td>' + (cell == null || cell === '' ? '<span class="empty-cell">—</span>' : cell) + '</td>'
+        }).join('')
+        return '<tr class="' + (ri % 2 === 0 ? 'row-even' : 'row-odd') + '">' + cells + '</tr>'
+      }).join('')
+      return '<section class="doc-section fade-in" style="animation-delay:' + delay + 's">' +
+        (s.heading ? '<h2 class="section-heading"><span class="heading-bar"></span>' + s.heading + '</h2>' : '') +
+        '<div class="table-wrap"><table><thead><tr>' + headerCells + '</tr></thead><tbody>' + bodyRows + '</tbody></table></div>' +
+        '</section>'
+    }
+    return '<section class="doc-section fade-in" style="animation-delay:' + delay + 's">' +
+      (s.heading ? '<h2 class="section-heading"><span class="heading-bar"></span>' + s.heading + '</h2>' : '') +
+      '<p class="section-text">' + (s.text || '') + '</p></section>'
+  }).join('')
+
+  const now = new Date()
+  const dateStr = now.toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+
+  return '<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>' + title + '</title>' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+    '<style>' +
+    ':root{--navy:#1a2456;--navy-light:#2d3a7a;--teal:#0e7c86;--gold:#c9a227;--bg:#f4f6fb;--ink:#1f2430;--muted:#6b7280;--line:#e6e9f2;}' +
+    '*{margin:0;padding:0;box-sizing:border-box;}' +
+    'html,body{background:var(--bg);}' +
+    'body{font-family:"Segoe UI","Tahoma",Arial,sans-serif;color:var(--ink);padding:0 0 40px;}' +
+    '.print-btn{position:fixed;top:18px;left:18px;z-index:50;background:linear-gradient(135deg,var(--navy),var(--navy-light));color:#fff;border:none;padding:12px 22px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 8px 20px rgba(26,36,86,0.35);letter-spacing:.3px;transition:transform .15s ease;}' +
+    '.print-btn:hover{transform:translateY(-2px);}' +
+    '.page{max-width:900px;margin:0 auto;padding:0 28px;}' +
+    '.header-band{background:linear-gradient(135deg,var(--navy) 0%,var(--navy-light) 55%,var(--teal) 100%);padding:46px 28px 34px;margin-bottom:0;position:relative;overflow:hidden;}' +
+    '.header-band::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 85% 15%,rgba(201,162,39,0.25),transparent 55%);}' +
+    '.header-inner{max-width:900px;margin:0 auto;position:relative;z-index:2;}' +
+    '.brand-row{display:flex;align-items:center;gap:12px;margin-bottom:18px;}' +
+    '.brand-dot{width:10px;height:10px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 4px rgba(201,162,39,0.25);}' +
+    '.brand-name{color:rgba(255,255,255,0.85);font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:600;}' +
+    '.doc-title{color:#fff;font-size:28px;font-weight:800;margin-bottom:10px;letter-spacing:.2px;}' +
+    '.doc-meta{color:rgba(255,255,255,0.82);font-size:13px;display:flex;gap:18px;flex-wrap:wrap;}' +
+    '.doc-meta span{display:flex;align-items:center;gap:6px;}' +
+    '.content-card{background:#fff;margin:-26px auto 0;max-width:900px;border-radius:18px;box-shadow:0 18px 40px rgba(26,36,86,0.12);padding:34px 30px;position:relative;z-index:3;}' +
+    '.doc-section{margin-bottom:28px;}' +
+    '.doc-section:last-child{margin-bottom:0;}' +
+    '.section-heading{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;color:var(--navy);margin-bottom:14px;}' +
+    '.heading-bar{width:5px;height:18px;border-radius:3px;background:linear-gradient(180deg,var(--gold),var(--teal));display:inline-block;}' +
+    '.section-text{font-size:13.5px;line-height:2;color:#374151;background:#fafbfe;border:1px solid var(--line);border-radius:12px;padding:16px 18px;}' +
+    '.table-wrap{border:1px solid var(--line);border-radius:14px;overflow:hidden;}' +
+    'table{width:100%;border-collapse:collapse;font-size:13px;}' +
+    'thead tr{background:linear-gradient(135deg,var(--navy),var(--navy-light));}' +
+    'thead th{color:#fff;text-align:right;padding:12px 14px;font-weight:600;font-size:12.5px;letter-spacing:.3px;}' +
+    'tbody td{padding:11px 14px;border-bottom:1px solid var(--line);color:#2b3140;}' +
+    'tbody tr:last-child td{border-bottom:none;}' +
+    '.row-even{background:#ffffff;}' +
+    '.row-odd{background:#f7f9fd;}' +
+    'tbody tr{transition:background .15s ease;}' +
+    '.empty-cell{color:#b6bcc9;}' +
+    '.footer-note{max-width:900px;margin:26px auto 0;text-align:center;font-size:11.5px;color:var(--muted);display:flex;align-items:center;justify-content:center;gap:8px;}' +
+    '.footer-line{flex:1;max-width:120px;height:1px;background:var(--line);}' +
+    '.fade-in{opacity:0;animation:fadeInUp .5s ease forwards;}' +
+    '@keyframes fadeInUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}' +
+    '@media print{' +
+    '.print-btn{display:none;}' +
+    'body{background:#fff;}' +
+    '.header-band{-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
+    'thead tr{-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
+    '.content-card{box-shadow:none;margin-top:-26px;}' +
+    '.fade-in{opacity:1;animation:none;}' +
+    '@page{margin:10mm;}' +
+    '}' +
+    '</style></head><body>' +
+    '<button class="print-btn" onclick="window.print()">🖨️ طباعة / حفظ PDF</button>' +
+    '<div class="header-band"><div class="header-inner">' +
+    '<div class="brand-row"><span class="brand-dot"></span><span class="brand-name">Smart Lab System</span></div>' +
+    '<h1 class="doc-title">' + title + '</h1>' +
+    '<div class="doc-meta"><span>📅 ' + dateStr + '</span><span>🕐 ' + timeStr + '</span></div>' +
+    '</div></div>' +
+    '<div class="page"><div class="content-card">' + sectionsHtml + '</div>' +
+    '<div class="footer-note"><span class="footer-line"></span><span>تم إنشاؤه بواسطة لابو 🤖 - Smart Lab System</span><span class="footer-line"></span></div>' +
+    '</div>' +
+    '</body></html>'
+}
+
+// بيفتح أي HTML جاهز في تاب جديد بأمان (Blob URL بدل document.write المباشر، بيمنع أي تعليق للتاب الأساسي)
+const openHtmlInNewTab = (html) => {
+  const blob = new Blob([html], { type: 'text/html' })
+  const blobUrl = URL.createObjectURL(blob)
+  const win = window.open(blobUrl, '_blank')
+  if (!win) { URL.revokeObjectURL(blobUrl); return false }
+  setTimeout(function () { URL.revokeObjectURL(blobUrl) }, 60000)
+  return true
+}
+
 const renderMarkdown = (text) => {
   if (!text) return ''
   return text
@@ -123,10 +222,6 @@ const blobToBase64 = (blob) => {
 }
 
 // بيضغط الصورة (تصغير الأبعاد + ضغط JPEG) قبل تحويلها لـ base64 وإرسالها للابو.
-// صور الكاميرا الحقيقية ممكن تكون كذا ميجا، وبعتها كما هي كـ base64 كان بيبطّئ الرد
-// جدًا (وقت رفع البيانات + وقت معالجتها). دلوقتي أي صورة بتتصغر لأقصى بعد 1600px
-// وتتضغط لـ JPEG جودة 85% قبل الإرسال، وده بيقلل الحجم بشكل كبير من غير فرق ملحوظ
-// في وضوح التفاصيل المطلوبة (نص التحليل، الأرقام).
 const compressImageToBase64 = (file, maxSize, quality) => {
   maxSize = maxSize || 1600
   quality = quality || 0.85
@@ -189,7 +284,6 @@ const pcmBase64ToWavBlob = (base64Pcm, sampleRate, numChannels, bitDepth) => {
   return new Blob([buffer], { type: 'audio/wav' })
 }
 
-// بيحوّل AudioBuffer (بعد فك أي صيغة صوت زي webm/opus) لملف WAV خام - صيغة مقبولة عند Gemini
 const audioBufferToWavBlob = (audioBuffer) => {
   const numChannels = audioBuffer.numberOfChannels
   const sampleRate = audioBuffer.sampleRate
@@ -237,7 +331,6 @@ const audioBufferToWavBlob = (audioBuffer) => {
   return new Blob([buffer], { type: 'audio/wav' })
 }
 
-// بيحوّل أي تسجيل صوتي (زي webm/opus من المتصفح) لملف WAV - عشان Gemini مش بيقبل صيغة webm خالص
 const convertRecordingToWav = async (audioBlob) => {
   const arrayBuffer = await audioBlob.arrayBuffer()
   const AudioContextClass = window.AudioContext || window.webkitAudioContext
@@ -414,11 +507,36 @@ const TOOLS = [
       },
       required: ['period']
     }
+  },
+  {
+    type: 'function',
+    name: 'generate_document_pdf',
+    description: 'ينشئ تقرير PDF عام أنيق ومصمّم باحترافية من أي محتوى في السيستم (بيانات مريض، قايمة نتائج، قايمة مرضى، ملخص حالة، أو أي نص/جدول تاني) ويفتحه في تاب جديد جاهز للطباعة أو الحفظ. استخدمها لأي طلب PDF أو "طباعة" عام غير التقرير المالي (اللي له أداته الخاصة generate_financial_report). عملية قراءة آمنة تمامًا، نفّذها فورًا بدون انتظار تأكيد.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'عنوان التقرير' },
+        sections: {
+          type: 'array',
+          description: 'أقسام التقرير، كل قسم إما جدول أو نص',
+          items: {
+            type: 'object',
+            properties: {
+              heading: { type: 'string', description: 'عنوان القسم (اختياري)' },
+              type: { type: 'string', enum: ['table', 'text'] },
+              text: { type: 'string', description: 'مطلوب لو type = text' },
+              columns: { type: 'array', items: { type: 'string' }, description: 'أسماء أعمدة الجدول، مطلوب لو type = table' },
+              rows: { type: 'array', items: { type: 'array', items: { type: 'string' } }, description: 'صفوف الجدول (كل صف مصفوفة نصوص بنفس عدد الأعمدة)، مطلوب لو type = table' }
+            }
+          }
+        }
+      },
+      required: ['title', 'sections']
+    }
   }
 ]
 
-// ردود جاهزة محلية للأسئلة الشائعة جدًا - بتشتغل من غير أي اتصال بـ Gemini خالص،
-// بتستخدم بس لما حصة الـ API تخلص عشان لابو يفضل مفيد حتى في أسوأ الحالات
+// ردود جاهزة محلية للأسئلة الشائعة جدًا - بتشتغل من غير أي اتصال بـ Gemini خالص
 const OFFLINE_FAQ = [
   { keys: ['سجل مريض', 'تسجيل مريض', 'مريض جديد'], answer: 'تقدر تسجّل مريض جديد من زرار "➕ مريض جديد" في القائمة الجانبية، أو من نفس الشات لو الخدمة الذكية رجعت شغالة.' },
   { keys: ['نتائج', 'نتيجة التحليل', 'فين النتائج'], answer: 'نتائج التحاليل موجودة في صفحة "🔬 نتائج التحاليل" من القائمة الجانبية.' },
@@ -433,9 +551,8 @@ const findOfflineAnswer = (userText) => {
   return match ? match.answer : null
 }
 
-// أدوات نتيجتها واضحة بذاتها ومش محتاجة "جولة تانية" مع الموديل عشان يلخصها - بنعرض رسالتها
-// للمستخدم فورًا (إحساس طلب واحد بس)، وده كمان اللي بيمنع أي تعليق ظاهري وانت مشغول بتاب التقرير
-const SKIP_FOLLOWUP_TOOLS = ['generate_financial_report', 'open_patient_report']
+// أدوات نتيجتها واضحة بذاتها ومش محتاجة "جولة تانية" مع الموديل عشان يلخصها
+const SKIP_FOLLOWUP_TOOLS = ['generate_financial_report', 'open_patient_report', 'generate_document_pdf']
 
 const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات (طب، علوم، تاريخ، تكنولوجيا، رياضة، فن، حياة عامة... أي موضوع).\n\n' +
   'شخصيتك:\n' +
@@ -449,7 +566,8 @@ const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous ب�
   '- find_patient: استخدمها أول ما تحتاج أي تفصيل عن مريض معين (تحاليله، نتائجه، حالته). لا تخمّن بيانات مريض من نفسك أبدًا.\n\n' +
   'قواعد التأكيد قبل التنفيذ (مهم جدًا، أمان البيانات الطبية يعتمد عليها):\n' +
   '- propose_new_patient، propose_test_result، propose_update_patient، propose_delete_patient: الأربعة دول بيعرضوا البيانات في الشات للمستخدم يأكدها بنفسه، وما بيحفظوش أو يعدّلوا أو يمسحوا حاجة فعليًا. لو استخدمت واحدة منهم، قول للمستخدم إن البيانات معروضة وتنتظر تأكيده، ومتقولش أبدًا إن العملية "تمت".\n' +
-  '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info و generate_financial_report: آمنين (إضافة بس، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
+  '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info و generate_financial_report و generate_document_pdf: آمنين (إضافة بس، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
+  '- generate_document_pdf: استخدمها لأي طلب PDF أو تقرير عام (قايمة مرضى، نتائج تحليل، ملخص حالة مريض، أو أي محتوى تاني في السيستم)، بس لو الطلب عن الفلوس/الإيراد استخدم generate_financial_report بدلها. لو محتاج بيانات مريض أو تحاليل عشان تبني منها التقرير، استخدم find_patient أو list_patients الأول عشان تجيب البيانات الحقيقية قبل ما تبني الجدول، لا تخترع بيانات من عندك أبدًا.\n' +
   '- لو الأداة رجعت لك رسالة فيها "في أكتر من مريض بنفس الاسم"، اسأل المستخدم يحدد قبل ما تكمل، لا تخمّن.\n\n' +
   'التعامل مع الكلام الغامض أو الصوت غير الواضح:\n' +
   '- لو الرسالة غير واضحة وما تقدرش تحدد بدقة إنها تطابق أمر معين، لا تستخدم أي أداة فوراً، خمّن أقرب أمر واسأل المستخدم بوضوح\n' +
@@ -477,8 +595,6 @@ export default function AIAssistant() {
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [copiedIndex, setCopiedIndex] = useState(null)
-  // الصور دي بتتخزن هنا بس (React state = ذاكرة المتصفح). مفيش أي حفظ في Supabase أو أي تخزين دائم،
-  // وبمجرد ما التاب يتقفل أو الصفحة تتعمل لها Refresh، البيانات دي بتتمسح تلقائيًا من الذاكرة.
   const [pendingImages, setPendingImages] = useState([])
 
   const messagesEndRef = useRef(null)
@@ -489,7 +605,7 @@ export default function AIAssistant() {
   const audioChunksRef = useRef([])
   const streamRef = useRef(null)
   const abortControllerRef = useRef(null)
-  const isSendingRef = useRef(false) // قفل فوري يمنع إرسال مزدوج (ضغطة سريعة مرتين) - عكس state اللي بيتأخر شوية في التحديث
+  const isSendingRef = useRef(false)
   const recordingTimeoutRef = useRef(null)
   const recordingIntervalRef = useRef(null)
   const currentAudioRef = useRef(null)
@@ -525,15 +641,11 @@ export default function AIAssistant() {
     historyRef.current = { previousId: null }
   }
 
-  // نسخة خفيفة: بتجيب بيانات المرضى الأساسية بس (من غير التحاليل) - دي اللي بتتفحص كل رسالة
-  // عشان لابو يقدر يحدد المريض المقصود بالاسم، من غير ما نجيب كل تحاليل كل المرضى في كل مرة
   const getPatientsLight = async () => {
     const res = await supabase.from('patients').select('id, name, age, age_unit, gender, phone, doctor')
     return res.data || []
   }
 
-  // بيجيب مريض واحد بالتفصيل (مع كل تحاليله) - بيتستخدم بس لما فعلاً نحتاج تفاصيل مريض معين
-  // (find_patient، أو تنفيذ نتيجة تحليل)، بدل ما نجيب كل المرضى وتحاليلهم في كل رسالة
   const getPatientWithTests = async (patientId) => {
     const res = await supabase.from('patients').select('*, tests(*)').eq('id', patientId).single()
     return res.data || null
@@ -575,8 +687,6 @@ export default function AIAssistant() {
     }
   }
 
-  // --- التعامل مع إرفاق الصور (في الذاكرة فقط، بدون أي تخزين في Supabase) ---
-
   const handleImageButtonClick = () => {
     if (pendingImages.length >= MAX_IMAGES) {
       showStatus('⚠️ الحد الأقصى ' + MAX_IMAGES + ' صور في المرة الواحدة')
@@ -587,7 +697,7 @@ export default function AIAssistant() {
 
   const handleImageFilesSelected = async (e) => {
     const files = Array.from(e.target.files || [])
-    e.target.value = '' // عشان تقدر تختار نفس الصورة تاني لو مسحتها
+    e.target.value = ''
     if (!files.length) return
 
     const room = MAX_IMAGES - pendingImages.length
@@ -623,8 +733,6 @@ export default function AIAssistant() {
     })
   }
 
-  // بيبدأ سياق جديد تمامًا مع Gemini (بيمسح previous_interaction_id) عشان الرد يفضل سريع.
-  // بيانات المرضى والتحاليل في Supabase متأثرتش خالص، بس لابو هينسى تفاصيل كلام المحادثة القديمة.
   const startNewConversation = () => {
     stopSpeaking()
     if (loading) stopGeneration()
@@ -639,7 +747,7 @@ export default function AIAssistant() {
     const trimmed = (text || '').trim()
     const imagesToSend = pendingImages
     if (!trimmed && imagesToSend.length === 0) return
-    if (isSendingRef.current) return // قفل فوري - بيمنع أي محاولة إرسال ثانية لحد ما الأولى تخلص تمامًا
+    if (isSendingRef.current) return
     isSendingRef.current = true
 
     stopSpeaking()
@@ -674,11 +782,8 @@ export default function AIAssistant() {
       imagesToSend.forEach(function (img) {
         contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
       })
-      // ⏱️ تشخيص مؤقت لقياس مصدر البطء - هيظهر في Console بس، مش هيأثر على أي حاجة تانية
       const streamState = { id: null, text: '', startTime: performance.now(), firstTokenAt: null, flushTimer: null }
-      console.log('⏱️ [لابو] بدأ الإرسال: ' + new Date().toLocaleTimeString('ar-EG'))
       await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patients, 0, streamState)
-      console.log('⏱️ [لابو] انتهى كل حاجة بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من البداية')
     } catch (err) {
       if (err.name === 'AbortError') {
         setMessages(function (prev) { return prev.concat([{ role: 'status', content: '⏹ تم إيقاف الطلب', time: Date.now() }]) })
@@ -696,8 +801,6 @@ export default function AIAssistant() {
           }
         }
 
-        // لو الخطأ بسبب تجاوز الحصة (quota)، جوجل بتقول "Please retry in Xs" - نستخرج الرقم ده
-        // عشان نمنع المستخدم يدوس "حاول تاني" قبل ما الوقت ده يخلص فعليًا (كل محاولة مبكرة بترجّع نفس الخطأ)
         const retryMatch = errMsg.match(/retry in ([\d.]+)s/i)
         const retryUnlockAt = retryMatch ? Date.now() + Math.ceil(parseFloat(retryMatch[1])) * 1000 : null
         setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ تقني: ' + errMsg + '\n\nلو المشكلة استمرت، افتح Console (F12) وابعت التفاصيل.', retryText: userMessageText, retryUnlockAt: retryUnlockAt, time: Date.now() }]) })
@@ -722,22 +825,20 @@ export default function AIAssistant() {
       input: inputPayload,
       tools: TOOLS,
       system_instruction: SYSTEM_INSTRUCTION,
-      generation_config: { thinking_level: 'low' }, // بيقلل وقت "التفكير" الداخلي عشان الرد يطلع أسرع
-      stream: true // بيخلي الرد يوصل تدريجيًا (SSE) بدل ما نستنى الرد كامل يخلص
+      generation_config: { thinking_level: 'low' },
+      stream: true
     }
     if (historyRef.current.previousId) body.previous_interaction_id = historyRef.current.previousId
 
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error('لازم تسجّل دخول عشان تستخدم المساعد الذكي')
 
-    const fetchStartedAt = performance.now()
     const response = await fetch(supabase.supabaseUrl + '/functions/v1/gemini-proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
       signal: signal,
       body: JSON.stringify({ path: INTERACTIONS_PATH + '?alt=sse', body: body })
     })
-    console.log('⏱️ [لابو] جولة ' + depth + ' (موديل: ' + modelToUse + '): وصلت أول استجابة HTTP بعد ' + ((performance.now() - fetchStartedAt) / 1000).toFixed(1) + ' ثانية (من بداية هذه الجولة، بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من إجمالي البداية)')
 
     if (!response.ok || !response.body) {
       let apiErrorMsg = 'رمز الخطأ: ' + response.status
@@ -746,7 +847,6 @@ export default function AIAssistant() {
         if (errData.error && errData.error.message) apiErrorMsg = errData.error.message
       } catch (e) { /* الرد مش JSON، هنكتفي برمز الخطأ */ }
 
-      // لو الموديل الحالي "مشغول" (overloaded)، نجرب اللي بعده في السلسلة تلقائيًا
       const isOverloaded = /overloaded|high demand|503/i.test(apiErrorMsg) || response.status === 503
       if (isOverloaded && modelIndex < MODEL_CHAIN.length - 1) {
         showStatus('🔄 موديل "' + modelToUse + '" مشغول دلوقتي، بيجرب موديل بديل...')
@@ -812,7 +912,6 @@ export default function AIAssistant() {
       }
     }
 
-    // نضمن إن آخر جزء من النص المتجمّع اتعرض فعليًا قبل ما نكمل (لو كان لسه مستني الـ 80ms التالية)
     if (streamState.flushTimer) {
       clearTimeout(streamState.flushTimer)
       streamState.flushTimer = null
@@ -824,7 +923,6 @@ export default function AIAssistant() {
     if (finalInteractionId) historyRef.current.previousId = finalInteractionId
 
     if (finalStatus === 'requires_action' && functionCallOrder.length > 0) {
-      console.log('⏱️ [لابو] جولة ' + depth + ': طلب تنفيذ أداة (' + functionCallOrder.map(function (idx) { return functionCallsMap[idx].name }).join(', ') + ') بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية من البداية')
       const functionResults = []
       const executedNames = []
       let lastVisibleResult = ''
@@ -849,7 +947,6 @@ export default function AIAssistant() {
         })
       }
 
-      // لو كل الأدوات المنفذة نتيجتها واضحة بذاتها، نعرضها فورًا كرد نهائي من غير جولة تانية
       const allSkippable = executedNames.length > 0 && executedNames.every(function (n) { return SKIP_FOLLOWUP_TOOLS.indexOf(n) !== -1 })
       if (allSkippable) {
         setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: lastVisibleResult, time: Date.now() }]) })
@@ -861,10 +958,6 @@ export default function AIAssistant() {
       return
     }
 
-    console.log('⏱️ [لابو] انتهت كل الجولات (بدون tool call إضافي) بعد ' + ((performance.now() - streamState.startTime) / 1000).toFixed(1) + ' ثانية إجمالي')
-
-    // خلصت كل الجولات (مفيش أدوات معلّقة) - دلوقتي نتأكد إن فيه رد ظهر
-    // ملاحظة: مبقاش بيتقرا بصوت عالي تلقائيًا؛ المستخدم هو اللي بيدوس على زرار 🔊 لو عايز يسمعه
     if (!streamState.text) {
       setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ، حاول مرة أخرى.', time: Date.now() }]) })
     }
@@ -874,13 +967,10 @@ export default function AIAssistant() {
     setMessages(function (prev) { return prev.concat([{ role: 'status', content: text, time: Date.now() }]) })
   }
 
-  // بيضيف/يحدّث فقاعة رد لابو تدريجيًا كل ما توصل قطعة نص جديدة من الـ streaming (SSE)،
-  // بدل ما نستنى الرد كامل يخلص وبعدين يظهر مرة واحدة
   const appendAssistantStreamText = (streamState, chunk) => {
     if (!chunk) return
     if (streamState.firstTokenAt === null) {
       streamState.firstTokenAt = performance.now()
-      console.log('⏱️ [لابو] وصل أول حرف من الرد بعد ' + ((streamState.firstTokenAt - streamState.startTime) / 1000).toFixed(1) + ' ثانية من الإرسال')
     }
     streamState.text += chunk
 
@@ -890,8 +980,6 @@ export default function AIAssistant() {
       return
     }
 
-    // بنجمّع أكتر من قطعة نص وبنحدّث الواجهة كل ~80ms بدل كل قطعة لوحدها - ده بيقلل التحديثات
-    // اللي كانت بتتكدّس لو التاب مش في الفوكس (زي وقت فتح تاب التقرير) وبتحس إنها "تعليق" لما ترجع
     const sid = streamState.id
     if (streamState.flushTimer) return
     streamState.flushTimer = setTimeout(function () {
@@ -1059,20 +1147,28 @@ export default function AIAssistant() {
         const rangeLabel = start.toLocaleDateString('ar-EG') + ' → ' + new Date(end.getTime() - 1).toLocaleDateString('ar-EG')
         const html = buildFinancialReportHTML(summary, { periodLabel: label, rangeLabel })
 
-        // Blob URL بدل document.write المباشر - أثبت، وبيفضل شغال حتى لو رجعت للتاب الأساسي بسرعة
-        // (document.write المباشر بيوقف الـ main thread لحظيًا وممكن يحس المستخدم إنه "تعليق")
-        const blob = new Blob([html], { type: 'text/html' })
-        const blobUrl = URL.createObjectURL(blob)
-        const reportWindow = window.open(blobUrl, '_blank')
-        if (!reportWindow) {
-          URL.revokeObjectURL(blobUrl)
+        const opened = openHtmlInNewTab(html)
+        if (!opened) {
           return 'المتصفح منع فتح تاب جديد (pop-up). من فضلك اسمح بالنوافذ المنبثقة لهذا الموقع من إعدادات المتصفح وحاول تاني.'
         }
-        setTimeout(function () { URL.revokeObjectURL(blobUrl) }, 60000)
 
         return 'تم تجهيز التقرير المالي عن "' + label + '" وفتحه في تاب جديد. من فيه، دوس زرار "🖨️ طباعة / حفظ PDF" وفي نافذة الطباعة اختار Save as PDF عشان تحفظه كملف.'
       } catch (err) {
         return 'حصل خطأ أثناء تجهيز التقرير المالي: ' + err.message
+      }
+    }
+
+    if (name === 'generate_document_pdf') {
+      try {
+        showStatus('📄 بيجهّز التقرير...')
+        const html = buildGenericPdfHTML(args.title || 'تقرير', args.sections || [])
+        const opened = openHtmlInNewTab(html)
+        if (!opened) {
+          return 'المتصفح منع فتح تاب جديد (pop-up). من فضلك اسمح بالنوافذ المنبثقة لهذا الموقع من إعدادات المتصفح وحاول تاني.'
+        }
+        return 'تم تجهيز تقرير "' + (args.title || '') + '" بتصميم احترافي وفتحه في تاب جديد. من فيه، دوس زرار "🖨️ طباعة / حفظ PDF" وفي نافذة الطباعة اختار Save as PDF عشان تحفظه كملف.'
+      } catch (err) {
+        return 'حصل خطأ أثناء تجهيز التقرير: ' + err.message
       }
     }
 
@@ -1245,7 +1341,6 @@ export default function AIAssistant() {
       const trimmed = sentence.trim()
       if (!trimmed) return
       if (trimmed.length > MAX_CHUNK) {
-        // جملة واحدة أطول من الحد الأقصى (نادر جدًا) - نفضّي اللي اتجمّع لحد دلوقتي، وبعدين نقسّمها هي بس
         if (current) { chunks.push(current); current = '' }
         let remaining = trimmed
         while (remaining.length > 0) {
