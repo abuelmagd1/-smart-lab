@@ -15,30 +15,15 @@ const INTERACTIONS_PATH = '/v1/interactions'
 const TTS_MODEL = 'gemini-3.1-flash-tts-preview'
 const GENERATE_CONTENT_PATH = '/v1beta/models/' + TTS_MODEL + ':generateContent'
 
-// بيبني صفحة PDF عامة من أي محتوى (نص أو جداول) - تصميم احترافي متناسق مع هوية Smart Lab
-const buildGenericPdfHTML = (title, sections) => {
-  const sectionsHtml = (sections || []).map(function (s, idx) {
-    const delay = (idx * 0.06).toFixed(2)
-    if (s.type === 'table' && s.columns && s.rows) {
-      const headerCells = s.columns.map(function (c) {
-        return '<th>' + c + '</th>'
-      }).join('')
-      const bodyRows = s.rows.map(function (row, ri) {
-        const cells = row.map(function (cell) {
-          return '<td>' + (cell == null || cell === '' ? '<span class="empty-cell">—</span>' : cell) + '</td>'
-        }).join('')
-        return '<tr class="' + (ri % 2 === 0 ? 'row-even' : 'row-odd') + '">' + cells + '</tr>'
-      }).join('')
-      return '<section class="doc-section fade-in" style="animation-delay:' + delay + 's">' +
-        (s.heading ? '<h2 class="section-heading"><span class="heading-bar"></span>' + s.heading + '</h2>' : '') +
-        '<div class="table-wrap"><table><thead><tr>' + headerCells + '</tr></thead><tbody>' + bodyRows + '</tbody></table></div>' +
-        '</section>'
-    }
-    return '<section class="doc-section fade-in" style="animation-delay:' + delay + 's">' +
-      (s.heading ? '<h2 class="section-heading"><span class="heading-bar"></span>' + s.heading + '</h2>' : '') +
-      '<p class="section-text">' + (s.text || '') + '</p></section>'
-  }).join('')
+// بيفصّل محتوى الـ <body> بس من أي صفحة HTML جاهزة، عشان نقدر نغلّفه بنفس قالب التصميم الموحّد
+const extractBodyContent = (html) => {
+  const match = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)
+  return match ? match[1] : html
+}
 
+// القالب البصري الموحّد (هيدر بتدرج لوني + بطاقة محتوى + فوتر) - مستخدم في كل أنواع تقارير الـ PDF
+// عشان أي تقرير في السيستم (مالي أو عام) يطلع بنفس الهوية البصرية بالظبط
+const buildBrandedPdfShell = (title, innerHtml) => {
   const now = new Date()
   const dateStr = now.toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
   const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
@@ -98,14 +83,59 @@ const buildGenericPdfHTML = (title, sections) => {
     '<h1 class="doc-title">' + title + '</h1>' +
     '<div class="doc-meta"><span>📅 ' + dateStr + '</span><span>🕐 ' + timeStr + '</span></div>' +
     '</div></div>' +
-    '<div class="page"><div class="content-card">' + sectionsHtml + '</div>' +
+    '<div class="page"><div class="content-card">' + innerHtml + '</div>' +
     '<div class="footer-note"><span class="footer-line"></span><span>تم إنشاؤه بواسطة لابو 🤖 - Smart Lab System</span><span class="footer-line"></span></div>' +
     '</div>' +
     '</body></html>'
 }
 
+// بيحوّل صف نصي مفصول بعلامة | (زي "أحمد|35|ذكر") لمصفوفة خلايا - أسهل وأضمن بكتير للموديل من إنه يطلّع
+// مصفوفة جوه مصفوفة أثناء الـ streaming، وده هو السبب الرئيسي إن الجداول كانت بتوصل فاضية أو مكسورة
+const parsePipeRow = (row) => {
+  if (Array.isArray(row)) return row
+  return String(row == null ? '' : row).split('|').map(function (c) { return c.trim() })
+}
+
+// بيبني صفحة PDF عامة من أي محتوى (نص أو جداول) - بيستخدم نفس القالب الموحّد
+const buildGenericPdfHTML = (title, sections) => {
+  const sectionsHtml = (sections || []).map(function (s, idx) {
+    const delay = (idx * 0.06).toFixed(2)
+    if (s.type === 'table' && s.columns && s.rows) {
+      const headerCells = s.columns.map(function (c) {
+        return '<th>' + c + '</th>'
+      }).join('')
+      const bodyRows = s.rows.map(function (rawRow, ri) {
+        const rowCells = parsePipeRow(rawRow)
+        // بنكمّل أي خلايا ناقصة بفراغات عشان لو الموديل بعت صف أعمدته أقل، الجدول برضه يفضل متساوي وميتكسرش شكله
+        while (rowCells.length < s.columns.length) rowCells.push('')
+        const cells = rowCells.slice(0, s.columns.length).map(function (cell) {
+          return '<td>' + (cell == null || cell === '' ? '<span class="empty-cell">—</span>' : cell) + '</td>'
+        }).join('')
+        return '<tr class="' + (ri % 2 === 0 ? 'row-even' : 'row-odd') + '">' + cells + '</tr>'
+      }).join('')
+      return '<section class="doc-section fade-in" style="animation-delay:' + delay + 's">' +
+        (s.heading ? '<h2 class="section-heading"><span class="heading-bar"></span>' + s.heading + '</h2>' : '') +
+        '<div class="table-wrap"><table><thead><tr>' + headerCells + '</tr></thead><tbody>' + bodyRows + '</tbody></table></div>' +
+        '</section>'
+    }
+    return '<section class="doc-section fade-in" style="animation-delay:' + delay + 's">' +
+      (s.heading ? '<h2 class="section-heading"><span class="heading-bar"></span>' + s.heading + '</h2>' : '') +
+      '<p class="section-text">' + (s.text || '') + '</p></section>'
+  }).join('')
+
+  return buildBrandedPdfShell(title, sectionsHtml)
+}
+
+// حماية بسيطة ضد فتح كذا تقرير مكرر في وقت متقارب جدًا (مثلاً لو الموديل استدعى الأداة مرتين بالغلط)
+let lastPdfOpenAt = 0
+const PDF_OPEN_COOLDOWN_MS = 1500
+
 // بيفتح أي HTML جاهز في تاب جديد بأمان (Blob URL بدل document.write المباشر، بيمنع أي تعليق للتاب الأساسي)
 const openHtmlInNewTab = (html) => {
+  const now = Date.now()
+  if (now - lastPdfOpenAt < PDF_OPEN_COOLDOWN_MS) return 'cooldown'
+  lastPdfOpenAt = now
+
   const blob = new Blob([html], { type: 'text/html' })
   const blobUrl = URL.createObjectURL(blob)
   const win = window.open(blobUrl, '_blank')
@@ -483,8 +513,14 @@ const TOOLS = [
   {
     type: 'function',
     name: 'list_patients',
-    description: 'يرجع عدد المرضى المسجلين وقائمة بأسمائهم. استخدمها فقط لو المستخدم سأل عن عدد المرضى أو طلب قائمة الأسماء.',
-    parameters: { type: 'object', properties: {} }
+    description: 'يرجع عدد المرضى المسجلين وقائمة بأسمائهم، مع إمكانية فلترة بفترة زمنية معينة. استخدمها لو المستخدم سأل عن عدد المرضى، طلب قائمة الأسماء، أو طلب تقرير/PDF عن مرضى فترة معينة (مثلاً "مرضى الأسبوع اللي فات").',
+    parameters: {
+      type: 'object',
+      properties: {
+        from_date: { type: 'string', description: 'تاريخ البداية بصيغة YYYY-MM-DD (اختياري)' },
+        to_date: { type: 'string', description: 'تاريخ النهاية بصيغة YYYY-MM-DD (اختياري، شامل هذا اليوم)' }
+      }
+    }
   },
   {
     type: 'function',
@@ -526,7 +562,11 @@ const TOOLS = [
               type: { type: 'string', enum: ['table', 'text'] },
               text: { type: 'string', description: 'مطلوب لو type = text' },
               columns: { type: 'array', items: { type: 'string' }, description: 'أسماء أعمدة الجدول، مطلوب لو type = table' },
-              rows: { type: 'array', items: { type: 'array', items: { type: 'string' } }, description: 'صفوف الجدول (كل صف مصفوفة نصوص بنفس عدد الأعمدة)، مطلوب لو type = table' }
+              rows: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'صفوف الجدول، مطلوب لو type = table. كل صف هو نص واحد بس، وخلاياه مفصولة بعلامة | (خط مائل رأسي)، وعدد الخلايا لازم يساوي عدد الأعمدة. مثال لعمودين "الاسم" و"السن": ["أحمد محمد|35", "سارة علي|28"]. متبعتش مصفوفة جوه مصفوفة أبدًا، الصف نص واحد بس.'
+              }
             }
           }
         }
@@ -562,12 +602,12 @@ const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous ب�
   '- لما بتنفذ حاجة فورًا، بتقول "تمام، عملت كذا ✅" بشكل مختصر وبطعم شخصيتك\n' +
   '- لو المستخدم بعتلك صورة (زي نتيجة تحليل ورقية، أو تقرير طبي، أو أي صورة تانية)، افحصها كويس واستخرج منها أي بيانات مفيدة (اسم مريض، نوع تحليل، قيم، إلخ) وساعده بيها في كلامه، بس متستخدمش أي أداة من غير ما تتأكد من البيانات الأول\n\n' +
   'الأدوات المتاحة لك وإزاي تستخدمها:\n' +
-  '- list_patients: استخدمها بس لو المستخدم سأل عن عدد المرضى أو طلب قائمة الأسماء. متفترضش إنك عارف القائمة من نفسك.\n' +
+  '- list_patients: استخدمها بس لو المستخدم سأل عن عدد المرضى أو طلب قائمة الأسماء (تقدر كمان تحدد from_date/to_date لو المستخدم قصد فترة معينة). متفترضش إنك عارف القائمة من نفسك.\n' +
   '- find_patient: استخدمها أول ما تحتاج أي تفصيل عن مريض معين (تحاليله، نتائجه، حالته). لا تخمّن بيانات مريض من نفسك أبدًا.\n\n' +
   'قواعد التأكيد قبل التنفيذ (مهم جدًا، أمان البيانات الطبية يعتمد عليها):\n' +
   '- propose_new_patient، propose_test_result، propose_update_patient، propose_delete_patient: الأربعة دول بيعرضوا البيانات في الشات للمستخدم يأكدها بنفسه، وما بيحفظوش أو يعدّلوا أو يمسحوا حاجة فعليًا. لو استخدمت واحدة منهم، قول للمستخدم إن البيانات معروضة وتنتظر تأكيده، ومتقولش أبدًا إن العملية "تمت".\n' +
   '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info و generate_financial_report و generate_document_pdf: آمنين (إضافة بس، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
-  '- generate_document_pdf: استخدمها لأي طلب PDF أو تقرير عام (قايمة مرضى، نتائج تحليل، ملخص حالة مريض، أو أي محتوى تاني في السيستم)، بس لو الطلب عن الفلوس/الإيراد استخدم generate_financial_report بدلها. لو محتاج بيانات مريض أو تحاليل عشان تبني منها التقرير، استخدم find_patient أو list_patients الأول عشان تجيب البيانات الحقيقية قبل ما تبني الجدول، لا تخترع بيانات من عندك أبدًا.\n' +
+  '- generate_document_pdf: استخدمها لأي طلب PDF أو تقرير عام (قايمة مرضى، نتائج تحليل، ملخص حالة مريض، أو أي محتوى تاني في السيستم)، بس لو الطلب عن الفلوس/الإيراد استخدم generate_financial_report بدلها. لو محتاج بيانات مريض أو تحاليل عشان تبني منها التقرير، استخدم find_patient أو list_patients الأول عشان تجيب البيانات الحقيقية قبل ما تبني الجدول، لا تخترع بيانات من عندك أبدًا. تذكّر: كل صف في الجدول لازم يبقى نص واحد وخلاياه مفصولة بعلامة | بس، مش مصفوفة.\n' +
   '- لو الأداة رجعت لك رسالة فيها "في أكتر من مريض بنفس الاسم"، اسأل المستخدم يحدد قبل ما تكمل، لا تخمّن.\n\n' +
   'التعامل مع الكلام الغامض أو الصوت غير الواضح:\n' +
   '- لو الرسالة غير واضحة وما تقدرش تحدد بدقة إنها تطابق أمر معين، لا تستخدم أي أداة فوراً، خمّن أقرب أمر واسأل المستخدم بوضوح\n' +
@@ -642,7 +682,7 @@ export default function AIAssistant() {
   }
 
   const getPatientsLight = async () => {
-    const res = await supabase.from('patients').select('id, name, age, age_unit, gender, phone, doctor')
+    const res = await supabase.from('patients').select('id, name, age, age_unit, gender, phone, doctor, created_at')
     return res.data || []
   }
 
@@ -1077,9 +1117,23 @@ export default function AIAssistant() {
     }
 
     if (name === 'list_patients') {
-      if (!patients.length) return 'لا يوجد مرضى مسجلين حاليًا.'
-      const roster = patients.map(function (p) { return p.name + ' (' + formatAge(p.age, p.age_unit) + '، ' + p.gender + ')' }).join('، ')
-      return 'عدد المرضى: ' + patients.length + '. الأسماء: ' + roster
+      let filtered = patients
+      if (args.from_date) {
+        const fromTs = new Date(args.from_date + 'T00:00:00').getTime()
+        filtered = filtered.filter(function (p) { return p.created_at && new Date(p.created_at).getTime() >= fromTs })
+      }
+      if (args.to_date) {
+        const toTs = new Date(args.to_date + 'T23:59:59').getTime()
+        filtered = filtered.filter(function (p) { return p.created_at && new Date(p.created_at).getTime() <= toTs })
+      }
+
+      if (!filtered.length) return 'مفيش مرضى مطابقين للفترة دي.'
+
+      const MAX_LISTED = 50
+      const shown = filtered.slice(0, MAX_LISTED)
+      const roster = shown.map(function (p) { return p.name + ' (' + formatAge(p.age, p.age_unit) + '، ' + p.gender + ')' }).join('، ')
+      const extra = filtered.length > MAX_LISTED ? ' (وعرضنا أول ' + MAX_LISTED + ' بس، العدد الكلي أكبر من كده)' : ''
+      return 'عدد المرضى المطابقين: ' + filtered.length + extra + '. الأسماء: ' + roster
     }
 
     if (name === 'find_patient') {
@@ -1145,9 +1199,12 @@ export default function AIAssistant() {
 
         const summary = summarizeFinances(patientsRes.data || [], expensesRes.data || [])
         const rangeLabel = start.toLocaleDateString('ar-EG') + ' → ' + new Date(end.getTime() - 1).toLocaleDateString('ar-EG')
-        const html = buildFinancialReportHTML(summary, { periodLabel: label, rangeLabel })
+        const rawHtml = buildFinancialReportHTML(summary, { periodLabel: label, rangeLabel })
+        const innerContent = extractBodyContent(rawHtml)
+        const html = buildBrandedPdfShell('التقرير المالي - ' + label, innerContent)
 
         const opened = openHtmlInNewTab(html)
+        if (opened === 'cooldown') return 'لسه فاتح تقرير من ثانية، من فضلك استنى شوية وحاول تاني.'
         if (!opened) {
           return 'المتصفح منع فتح تاب جديد (pop-up). من فضلك اسمح بالنوافذ المنبثقة لهذا الموقع من إعدادات المتصفح وحاول تاني.'
         }
@@ -1163,6 +1220,7 @@ export default function AIAssistant() {
         showStatus('📄 بيجهّز التقرير...')
         const html = buildGenericPdfHTML(args.title || 'تقرير', args.sections || [])
         const opened = openHtmlInNewTab(html)
+        if (opened === 'cooldown') return 'لسه فاتح تقرير من ثانية، من فضلك استنى شوية وحاول تاني.'
         if (!opened) {
           return 'المتصفح منع فتح تاب جديد (pop-up). من فضلك اسمح بالنوافذ المنبثقة لهذا الموقع من إعدادات المتصفح وحاول تاني.'
         }
