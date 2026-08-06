@@ -148,22 +148,30 @@ const buildGenericPdfHTML = (title, sectionsInput) => {
   return buildBrandedPdfShell(title, finalContent)
 }
 
-// حماية بسيطة ضد فتح كذا تقرير مكرر في وقت متقارب جدًا (مثلاً لو الموديل استدعى الأداة مرتين بالغلط)
-let lastPdfOpenAt = 0
-const PDF_OPEN_COOLDOWN_MS = 1500
-
-// بيفتح أي HTML جاهز في تاب جديد بأمان (Blob URL بدل document.write المباشر، بيمنع أي تعليق للتاب الأساسي)
-const openHtmlInNewTab = (html) => {
-  const now = Date.now()
-  if (now - lastPdfOpenAt < PDF_OPEN_COOLDOWN_MS) return 'cooldown'
-  lastPdfOpenAt = now
-
+// بيجهّز رابط Blob لأي تقرير HTML من غير ما يحاول يفتحه تلقائيًا. فتح تاب تلقائي بعد أي انتظار
+// شبكة (زي الـ streaming) بيتحجب غالبًا من المتصفح كـ pop-up لأنه مش نتيجة مباشرة لضغطة المستخدم.
+// بدل كده بنرجّع الرابط ده وبنعرض زرار "📄 فتح التقرير" في الشات، والمستخدم بيدوس عليه بنفسه -
+// وده ضغطة حقيقية فمش هيتحجب أبدًا.
+const buildReportBlobUrl = (html) => {
   const blob = new Blob([html], { type: 'text/html' })
-  const blobUrl = URL.createObjectURL(blob)
-  const win = window.open(blobUrl, '_blank')
-  if (!win) { URL.revokeObjectURL(blobUrl); return false }
-  setTimeout(function () { URL.revokeObjectURL(blobUrl) }, 60000)
-  return true
+  return URL.createObjectURL(blob)
+}
+
+// بيتأكد إن أقسام التقرير فيها محتوى حقيقي (مش فاضية) قبل ما نجهّز أي تقرير - بيمنع التقارير الفاضية
+// اللي بتحصل لو الموديل استدعى أداة البناء قبل ما يشوف نتيجة أداة جلب البيانات
+const sectionsHaveContent = (sectionsInput) => {
+  let sections = sectionsInput
+  if (typeof sections === 'string') {
+    try { sections = JSON.parse(sections) } catch (e) { return false }
+  }
+  if (!Array.isArray(sections) || sections.length === 0) return false
+  return sections.some(function (s) {
+    if (s.type === 'table') {
+      const rows = Array.isArray(s.rows) ? s.rows : []
+      return rows.some(function (r) { return parseTableRow(r).some(function (c) { return c && String(c).trim() }) })
+    }
+    return !!(s.text && String(s.text).trim())
+  })
 }
 
 const renderMarkdown = (text) => {
@@ -595,6 +603,92 @@ const TOOLS = [
       },
       required: ['title', 'sections']
     }
+  },
+  {
+    type: 'function',
+    name: 'manage_supply',
+    description: 'يدير المستلزمات والكيماويات: إضافة صنف جديد، تجديد كمية، استهلاك كمية، أو إرجاع قايمة الأصناف (كلها أو الناقصة بس). عملية آمنة (إضافة/تعديل كمية بسيط، مش حذف أو تعديل بيانات حساسة)، نفّذها فورًا بدون تأكيد.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['add_item', 'restock', 'consume', 'list'] },
+        name: { type: 'string', description: 'اسم الصنف - مطلوب لكل الأكشنز ما عدا list' },
+        unit: { type: 'string', description: 'وحدة القياس (اختياري لـ add_item)' },
+        initial_quantity: { type: 'number', description: 'الكمية الأولية (اختياري لـ add_item)' },
+        minimum_threshold: { type: 'number', description: 'الحد الأدنى للتنبيه (اختياري لـ add_item)' },
+        supplier: { type: 'string', description: 'اسم المورد (اختياري)' },
+        amount: { type: 'number', description: 'الكمية المطلوب إضافتها أو استهلاكها (مطلوب لـ restock/consume)' },
+        reason: { type: 'string', description: 'سبب الحركة (اختياري)' },
+        low_only: { type: 'boolean', description: 'لو true مع action=list، يرجّع الأصناف الناقصة بس' }
+      },
+      required: ['action']
+    }
+  },
+  {
+    type: 'function',
+    name: 'add_expense',
+    description: 'يسجّل مصروف جديد للمعمل. عملية إضافة آمنة، نفّذها فورًا بدون تأكيد.',
+    parameters: {
+      type: 'object',
+      properties: {
+        amount: { type: 'number', description: 'قيمة المصروف' },
+        category: { type: 'string', description: 'نوع المصروف (مثلاً: كهرباء، صيانة، رواتب)' },
+        description: { type: 'string', description: 'وصف إضافي (اختياري)' },
+        expense_date: { type: 'string', description: 'تاريخ المصروف بصيغة YYYY-MM-DD (اختياري، الافتراضي النهارده)' }
+      },
+      required: ['amount']
+    }
+  },
+  {
+    type: 'function',
+    name: 'list_expenses',
+    description: 'يرجع قايمة المصروفات في فترة معينة مع الإجمالي.',
+    parameters: {
+      type: 'object',
+      properties: {
+        from_date: { type: 'string', description: 'تاريخ البداية YYYY-MM-DD (اختياري)' },
+        to_date: { type: 'string', description: 'تاريخ النهاية YYYY-MM-DD (اختياري)' }
+      }
+    }
+  },
+  {
+    type: 'function',
+    name: 'doctor_stats',
+    description: 'يرجع إحصائيات الأطباء المحوّلين (عدد المرضى لكل دكتور)، أو لطبيب معين لو حددت اسمه.',
+    parameters: {
+      type: 'object',
+      properties: {
+        doctor_name: { type: 'string', description: 'اسم الدكتور لو عايز إحصائياته لوحده (اختياري)' }
+      }
+    }
+  },
+  {
+    type: 'function',
+    name: 'send_admin_notification',
+    description: 'يبعت إشعار نصي للأدمن. عملية إضافة آمنة، نفّذها فورًا بدون تأكيد.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'عنوان الإشعار (اختياري)' },
+        message: { type: 'string', description: 'نص الإشعار' }
+      },
+      required: ['message']
+    }
+  },
+  {
+    type: 'function',
+    name: 'manage_test_catalog',
+    description: 'يدير كتالوج التحاليل المعتمد: إضافة تحليل جديد، تعديل معدل طبيعي أو وحدة تحليل موجود، أو إرجاع قايمة الكتالوج. عملية آمنة، نفّذها فورًا بدون تأكيد.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['add', 'update', 'list'] },
+        name: { type: 'string', description: 'اسم التحليل - مطلوب لـ add و update' },
+        normal_range: { type: 'string', description: 'المعدل الطبيعي (اختياري)' },
+        unit: { type: 'string', description: 'وحدة القياس (اختياري)' }
+      },
+      required: ['action']
+    }
   }
 ]
 
@@ -632,8 +726,11 @@ const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous ب�
   '- find_patient: استخدمها أول ما تحتاج أي تفصيل عن مريض معين (تحاليله، نتائجه، حالته). لا تخمّن بيانات مريض من نفسك أبدًا.\n\n' +
   'قواعد التأكيد قبل التنفيذ (مهم جدًا، أمان البيانات الطبية يعتمد عليها):\n' +
   '- propose_new_patient، propose_test_result، propose_update_patient، propose_delete_patient: الأربعة دول بيعرضوا البيانات في الشات للمستخدم يأكدها بنفسه، وما بيحفظوش أو يعدّلوا أو يمسحوا حاجة فعليًا. لو استخدمت واحدة منهم، قول للمستخدم إن البيانات معروضة وتنتظر تأكيده، ومتقولش أبدًا إن العملية "تمت".\n' +
-  '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info و generate_financial_report و generate_document_pdf: آمنين (إضافة بس، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
+  '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info و generate_financial_report و generate_document_pdf و manage_supply و add_expense و list_expenses و doctor_stats و send_admin_notification و manage_test_catalog: آمنين (إضافة أو تعديل بسيط، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
+  '- manage_supply: بيتحكم في المستلزمات والكيماويات (إضافة صنف/تجديد/استهلاك/قائمة). manage_test_catalog: بيتحكم في كتالوج التحاليل المعتمد (إضافة/تعديل/قائمة). استخدمهم لأي طلب متعلق بالمخزون أو التحاليل المعتمدة، ولو المستخدم طلب تقرير عنهم استخدم البيانات اللي رجعت منهم في generate_document_pdf.\n' +
   '- generate_document_pdf: استخدمها لأي طلب PDF أو تقرير عام (قايمة مرضى، نتائج تحليل، ملخص حالة مريض، أو أي محتوى تاني في السيستم)، بس لو الطلب عن الفلوس/الإيراد استخدم generate_financial_report بدلها. لو محتاج بيانات مريض أو تحاليل عشان تبني منها التقرير، استخدم find_patient أو list_patients الأول عشان تجيب البيانات الحقيقية قبل ما تبني الجدول، لا تخترع بيانات من عندك أبدًا. مهم جدًا: في أي قسم جدول، لازم كل صف يكون نص واحد بس والخلايا مفصولة بعلامة | بالظبط زي ما موضّح في وصف الأداة، وعدد الخلايا لازم يساوي عدد الأعمدة، وإلا هيطلع القسم فاضي.\n' +
+  '- قاعدة صارمة: ممنوع تستدعي generate_document_pdf في نفس الرد اللي بتستدعي فيه list_patients أو find_patient. الأول استدعِ أداة جلب البيانات لوحدها وخد وقتك تشوف نتيجتها الحقيقية، وبعدين في ردك التالي استدعِ generate_document_pdf وحط فيها البيانات الحقيقية اللي رجعت لك بالظبط (مش placeholder ولا بيانات وهمية). لو استدعيتها من غير بيانات حقيقية هترجعلك رسالة تصحيح ومش هيتبني تقرير.\n' +
+  '- التقرير مش بيتفتح تلقائيًا في تاب جديد؛ هيظهر زرار "📄 فتح التقرير" في الشات والمستخدم هو اللي بيدوس عليه. متقولش للمستخدم إن التقرير "اتفتح"، قول له إنه "جاهز" وينتظر يدوس الزرار.\n' +
   '- لو الأداة رجعت لك رسالة فيها "في أكتر من مريض بنفس الاسم"، اسأل المستخدم يحدد قبل ما تكمل، لا تخمّن.\n\n' +
   'التعامل مع الكلام الغامض أو الصوت غير الواضح:\n' +
   '- لو الرسالة غير واضحة وما تقدرش تحدد بدقة إنها تطابق أمر معين، لا تستخدم أي أداة فوراً، خمّن أقرب أمر واسأل المستخدم بوضوح\n' +
@@ -992,19 +1089,24 @@ export default function AIAssistant() {
       const functionResults = []
       const executedNames = []
       let lastVisibleResult = ''
+      let reportUrl = null
+      let forceFollowup = false
       for (let i = 0; i < functionCallOrder.length; i++) {
         const fc = functionCallsMap[functionCallOrder[i]]
         let args = {}
         try { args = fc.argsText ? JSON.parse(fc.argsText) : {} } catch (e) { args = {} }
+        const meta = { reportUrl: null, forceFollowup: false }
         let resultText
         try {
-          resultText = await handleToolCall({ name: fc.name, id: fc.id, arguments: args }, signal, patients)
+          resultText = await handleToolCall({ name: fc.name, id: fc.id, arguments: args }, signal, patients, meta)
         } catch (err) {
           if (err.name === 'AbortError') throw err
           resultText = 'حصل خطأ غير متوقع في تنفيذ هذه العملية: ' + err.message
         }
         executedNames.push(fc.name)
         lastVisibleResult = resultText
+        if (meta.reportUrl) reportUrl = meta.reportUrl
+        if (meta.forceFollowup) forceFollowup = true
         functionResults.push({
           type: 'function_result',
           name: fc.name,
@@ -1013,9 +1115,11 @@ export default function AIAssistant() {
         })
       }
 
-      const allSkippable = executedNames.length > 0 && executedNames.every(function (n) { return SKIP_FOLLOWUP_TOOLS.indexOf(n) !== -1 })
+      // forceFollowup بتتفعّل لو أداة PDF اتنادت من غير بيانات حقيقية - بنجبر جولة تانية عشان
+      // الموديل يصحّح نفسه بدل ما نعرض رسالة فاضية أو تقرير بلا محتوى للمستخدم
+      const allSkippable = !forceFollowup && executedNames.length > 0 && executedNames.every(function (n) { return SKIP_FOLLOWUP_TOOLS.indexOf(n) !== -1 })
       if (allSkippable) {
-        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: lastVisibleResult, time: Date.now() }]) })
+        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: lastVisibleResult, time: Date.now(), reportUrl: reportUrl }]) })
         historyRef.current.previousId = null
         return
       }
@@ -1055,7 +1159,7 @@ export default function AIAssistant() {
     }, 80)
   }
 
-  const handleToolCall = async (call, signal, patients) => {
+  const handleToolCall = async (call, signal, patients, meta) => {
     const args = call.arguments || {}
     const name = call.name
 
@@ -1139,6 +1243,165 @@ export default function AIAssistant() {
         return msg
       } catch (err) {
         return 'فشل إضافة التحاليل: ' + err.message
+      }
+    }
+
+    if (name === 'manage_supply') {
+      try {
+        const action = args.action
+
+        if (action === 'list') {
+          const res = await supabase.from('lab_supplies').select('*').order('name')
+          if (res.error) throw res.error
+          let items = res.data || []
+          if (args.low_only) items = items.filter(function (s) { return Number(s.current_quantity) <= Number(s.minimum_threshold) })
+          if (!items.length) return args.low_only ? 'مفيش أصناف ناقصة حاليًا 🎉' : 'مفيش أصناف مسجلة في المستلزمات.'
+          const roster = items.map(function (s) { return s.name + ' (' + s.current_quantity + ' ' + (s.unit || '') + '، الحد الأدنى ' + s.minimum_threshold + ')' }).join('، ')
+          return 'عدد الأصناف: ' + items.length + '. ' + roster
+        }
+
+        if (action === 'add_item') {
+          if (!args.name) return 'محتاج اسم الصنف الأول.'
+          const dupRes = await supabase.from('lab_supplies').select('id').ilike('name', args.name).maybeSingle()
+          if (dupRes.data) return 'في صنف موجود بالفعل بنفس الاسم "' + args.name + '".'
+          const insertRes = await supabase.from('lab_supplies').insert([{
+            name: args.name, unit: args.unit || 'وحدة',
+            current_quantity: args.initial_quantity || 0,
+            minimum_threshold: args.minimum_threshold || 0,
+            supplier: args.supplier || null,
+          }])
+          if (insertRes.error) throw insertRes.error
+          return 'تم إضافة صنف "' + args.name + '" للمستلزمات بكمية ' + (args.initial_quantity || 0) + '.'
+        }
+
+        if (action === 'restock' || action === 'consume') {
+          if (!args.name || !args.amount) return 'محتاج اسم الصنف والكمية.'
+          const supplyRes = await supabase.from('lab_supplies').select('*').ilike('name', '%' + args.name + '%').limit(1).maybeSingle()
+          if (!supplyRes.data) return 'مش لاقي صنف اسمه "' + args.name + '".'
+          const supply = supplyRes.data
+          const signedAmount = action === 'restock' ? Number(args.amount) : -Number(args.amount)
+          const newQty = Number(supply.current_quantity) + signedAmount
+          if (newQty < 0) return 'الكمية المطلوبة أكبر من المتاح فعليًا (' + supply.current_quantity + ').'
+          const updateRes = await supabase.from('lab_supplies').update({ current_quantity: newQty }).eq('id', supply.id)
+          if (updateRes.error) throw updateRes.error
+          await supabase.from('lab_supply_movements').insert([{ supply_id: supply.id, change_amount: signedAmount, reason: args.reason || (action === 'restock' ? 'إضافة عبر لابو' : 'استهلاك عبر لابو') }])
+          return 'تم ' + (action === 'restock' ? 'إضافة' : 'خصم') + ' ' + args.amount + ' من "' + supply.name + '". الرصيد الحالي: ' + newQty + ' ' + (supply.unit || '')
+        }
+
+        return 'محتاج تحدد نوع العملية (إضافة صنف / تجديد / استهلاك / قائمة).'
+      } catch (err) {
+        return 'حصل خطأ في عملية المستلزمات: ' + err.message
+      }
+    }
+
+    if (name === 'add_expense') {
+      try {
+        if (!args.amount) return 'محتاج قيمة المصروف.'
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return 'لازم تكون مسجّل دخول عشان تسجّل مصروف.'
+        const payload = {
+          user_id: user.id,
+          amount: Number(args.amount),
+          category: args.category || 'عام',
+          description: args.description || null,
+          expense_date: args.expense_date || new Date().toISOString().slice(0, 10),
+        }
+        const res = await supabase.from('lab_expenses').insert([payload])
+        if (res.error) throw res.error
+        return 'تم تسجيل مصروف بقيمة ' + payload.amount + ' جنيه (' + payload.category + ') بتاريخ ' + payload.expense_date + '.'
+      } catch (err) {
+        return 'حصل خطأ أثناء تسجيل المصروف: ' + err.message
+      }
+    }
+
+    if (name === 'list_expenses') {
+      try {
+        let query = supabase.from('lab_expenses').select('*')
+        if (args.from_date) query = query.gte('expense_date', args.from_date)
+        if (args.to_date) query = query.lte('expense_date', args.to_date)
+        const res = await query.order('expense_date', { ascending: false })
+        if (res.error) throw res.error
+        const items = res.data || []
+        if (!items.length) return 'مفيش مصروفات مسجلة في الفترة دي.'
+        const total = items.reduce(function (sum, e) { return sum + (Number(e.amount) || 0) }, 0)
+        const list = items.slice(0, 30).map(function (e) { return (e.category || 'عام') + ': ' + e.amount + ' جنيه (' + e.expense_date + ')' }).join('، ')
+        return 'إجمالي المصروفات: ' + total + ' جنيه من ' + items.length + ' عملية. التفاصيل: ' + list
+      } catch (err) {
+        return 'حصل خطأ في جلب المصروفات: ' + err.message
+      }
+    }
+
+    if (name === 'doctor_stats') {
+      try {
+        const targetDoctor = (args.doctor_name || '').trim()
+        const grouped = {}
+        patients.forEach(function (p) {
+          const d = (p.doctor || 'بدون دكتور محدد').trim()
+          if (targetDoctor && !d.toLowerCase().includes(targetDoctor.toLowerCase())) return
+          grouped[d] = (grouped[d] || 0) + 1
+        })
+        const entries = Object.entries(grouped)
+        if (!entries.length) return targetDoctor ? 'مفيش مرضى محوّلين من دكتور اسمه "' + targetDoctor + '".' : 'مفيش بيانات أطباء محوّلين.'
+        entries.sort(function (a, b) { return b[1] - a[1] })
+        const list = entries.map(function (e) { return e[0] + ': ' + e[1] + ' مريض' }).join('، ')
+        return list
+      } catch (err) {
+        return 'حصل خطأ في حساب إحصائيات الأطباء: ' + err.message
+      }
+    }
+
+    if (name === 'send_admin_notification') {
+      try {
+        if (!args.message) return 'محتاج نص الإشعار.'
+        const res = await supabase.from('admin_notifications').insert([{
+          title: args.title || 'رسالة من لابو',
+          message: args.message,
+          target_user_id: null,
+        }])
+        if (res.error) throw res.error
+        return 'تم إرسال الإشعار للأدمن: "' + args.message + '"'
+      } catch (err) {
+        return 'حصل خطأ أثناء إرسال الإشعار: ' + err.message
+      }
+    }
+
+    if (name === 'manage_test_catalog') {
+      try {
+        const action = args.action
+
+        if (action === 'list') {
+          const res = await supabase.from('test_catalog').select('*').order('name')
+          if (res.error) throw res.error
+          const items = res.data || []
+          if (!items.length) return 'مفيش تحاليل في الكتالوج.'
+          const list = items.slice(0, 40).map(function (t) { return t.name + ' (' + (t.normal_range || 'بدون معدل') + (t.unit ? '، ' + t.unit : '') + ')' }).join('، ')
+          return 'عدد التحاليل في الكتالوج: ' + items.length + '. ' + list
+        }
+
+        if (action === 'add') {
+          if (!args.name) return 'محتاج اسم التحليل.'
+          const dupRes = await supabase.from('test_catalog').select('id').ilike('name', args.name).maybeSingle()
+          if (dupRes.data) return 'التحليل ده موجود بالفعل في الكتالوج.'
+          const res = await supabase.from('test_catalog').insert([{ name: args.name, normal_range: args.normal_range || null, unit: args.unit || null }])
+          if (res.error) throw res.error
+          return 'تم إضافة تحليل "' + args.name + '" للكتالوج.'
+        }
+
+        if (action === 'update') {
+          if (!args.name) return 'محتاج اسم التحليل المطلوب تعديله.'
+          const found = await supabase.from('test_catalog').select('id').ilike('name', args.name).maybeSingle()
+          if (!found.data) return 'مش لاقي تحليل اسمه "' + args.name + '" في الكتالوج.'
+          const updates = {}
+          if (args.normal_range) updates.normal_range = args.normal_range
+          if (args.unit) updates.unit = args.unit
+          const res = await supabase.from('test_catalog').update(updates).eq('id', found.data.id)
+          if (res.error) throw res.error
+          return 'تم تعديل بيانات تحليل "' + args.name + '".'
+        }
+
+        return 'محتاج تحدد نوع العملية (إضافة / تعديل / قائمة).'
+      } catch (err) {
+        return 'حصل خطأ في عملية الكتالوج: ' + err.message
       }
     }
 
@@ -1229,13 +1492,8 @@ export default function AIAssistant() {
         const innerContent = extractBodyContent(rawHtml)
         const html = buildBrandedPdfShell('التقرير المالي - ' + label, innerContent)
 
-        const opened = openHtmlInNewTab(html)
-        if (opened === 'cooldown') return 'لسه فاتح تقرير من ثانية، من فضلك استنى شوية وحاول تاني.'
-        if (!opened) {
-          return 'المتصفح منع فتح تاب جديد (pop-up). من فضلك اسمح بالنوافذ المنبثقة لهذا الموقع من إعدادات المتصفح وحاول تاني.'
-        }
-
-        return 'تم تجهيز التقرير المالي عن "' + label + '" وفتحه في تاب جديد. من فيه، دوس زرار "🖨️ طباعة / حفظ PDF" وفي نافذة الطباعة اختار Save as PDF عشان تحفظه كملف.'
+        if (meta) meta.reportUrl = buildReportBlobUrl(html)
+        return 'تم تجهيز التقرير المالي عن "' + label + '". دوس زرار "📄 فتح التقرير" اللي هيظهرلك عشان تفتحه في تاب جديد، وبعدين من جوه الصفحة دوس "🖨️ طباعة / حفظ PDF" واختار Save as PDF عشان تحفظه كملف.'
       } catch (err) {
         return 'حصل خطأ أثناء تجهيز التقرير المالي: ' + err.message
       }
@@ -1243,14 +1501,14 @@ export default function AIAssistant() {
 
     if (name === 'generate_document_pdf') {
       try {
+        if (!sectionsHaveContent(args.sections)) {
+          if (meta) meta.forceFollowup = true
+          return 'التقرير ده هيطلع فاضي لإن مفيش بيانات حقيقية جوه الأقسام اللي بعتها. لازم الأول تستدعي list_patients أو find_patient لوحدها وتستنى نتيجتها الحقيقية، وبعدين في ردك التالي استدعِ generate_document_pdf تاني وحط البيانات دي فعليًا جوه sections (صف واحد = نص واحد مفصول بـ |). حاول تاني دلوقتي بالترتيب الصح.'
+        }
         showStatus('📄 بيجهّز التقرير...')
         const html = buildGenericPdfHTML(args.title || 'تقرير', args.sections || [])
-        const opened = openHtmlInNewTab(html)
-        if (opened === 'cooldown') return 'لسه فاتح تقرير من ثانية، من فضلك استنى شوية وحاول تاني.'
-        if (!opened) {
-          return 'المتصفح منع فتح تاب جديد (pop-up). من فضلك اسمح بالنوافذ المنبثقة لهذا الموقع من إعدادات المتصفح وحاول تاني.'
-        }
-        return 'تم تجهيز تقرير "' + (args.title || '') + '" بتصميم احترافي وفتحه في تاب جديد. من فيه، دوس زرار "🖨️ طباعة / حفظ PDF" وفي نافذة الطباعة اختار Save as PDF عشان تحفظه كملف.'
+        if (meta) meta.reportUrl = buildReportBlobUrl(html)
+        return 'تم تجهيز تقرير "' + (args.title || '') + '" بتصميم احترافي. دوس زرار "📄 فتح التقرير" اللي هيظهرلك عشان تفتحه في تاب جديد.'
       } catch (err) {
         return 'حصل خطأ أثناء تجهيز التقرير: ' + err.message
       }
@@ -1557,6 +1815,13 @@ export default function AIAssistant() {
                 {msg.role === 'assistant'
                   ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
                   : msg.content}
+                {msg.role === 'assistant' && msg.reportUrl && (
+                  <button onClick={function () { window.open(msg.reportUrl, '_blank') }}
+                    className="mt-2 text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                    style={{ background: 'var(--primary-container)', color: 'white', border: 'none', cursor: 'pointer' }}>
+                    📄 فتح التقرير
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-2 mt-1 px-1">
