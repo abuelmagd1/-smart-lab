@@ -182,8 +182,6 @@ export default function Results() {
   const [savingTestId, setSavingTestId] = useState(null)
   const [finalizingPanel, setFinalizingPanel] = useState(null)
 
-  useEffect(() => { fetchPatients() }, [])
-
   const fetchPatients = async () => {
     const { data, error } = await supabase.from('patients').select('*, tests(*)').order('created_at', { ascending: false })
     if (error) {
@@ -192,6 +190,8 @@ export default function Results() {
     setPatients(data || [])
     setLoading(false)
   }
+
+  useEffect(() => { fetchPatients() }, [])
 
   const updateTest = async (testId, value, status, testName, patient) => {
     setSavingTestId(testId)

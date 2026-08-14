@@ -3,6 +3,44 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabase'
 import ErrorBoundary from '../components/ErrorBoundary'
 
+// حفظ محادثة لابو محليًا في المتصفح بس (sessionStorage) - صفر علاقة بـ Supabase وصفر
+// استهلاك من أي quota. sessionStorage بيتمسح تلقائيًا لما التاب يتقفل، وبنمسحه يدويًا
+// كمان عند تسجيل الخروج (تحت) عشان مستخدم تاني على نفس الجهاز ميشوفش محادثة قديمة.
+const CHAT_STORAGE_KEY = 'labo_chat_v1'
+const CHAT_STORAGE_MAX_MESSAGES = 40
+
+// بنخزن بس النص (role/content/time) - من غير صور (blob URLs بتموت بعد أي refresh أصلاً)
+// ومن غير كروت التأكيد/التقارير (روابطها مؤقتة ومش هتفضل صالحة بعد إعادة تحميل الصفحة)
+const sanitizeMessagesForStorage = (msgs) => {
+  return msgs
+    .filter(function (m) { return (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content }
+    )
+    .slice(-CHAT_STORAGE_MAX_MESSAGES)
+    .map(function (m) { return { role: m.role, content: m.content, time: m.time || null } })
+}
+
+const loadStoredChat = () => {
+  try {
+    const raw = sessionStorage.getItem(CHAT_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed) || parsed.length === 0) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+const saveStoredChat = (msgs) => {
+  try {
+    sessionStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(sanitizeMessagesForStorage(msgs)))
+  } catch { /* لو التخزين ممتلئ أو غير متاح، مفيش مشكلة، هي مجرد راحة إضافية مش أساسية */ }
+}
+
+export const clearStoredChat = () => {
+  try { sessionStorage.removeItem(CHAT_STORAGE_KEY) } catch { /* تجاهل */ }
+}
+
 const navItems = [
   { label: 'لوحة التحكم', icon: '📊', path: '/dashboard' },
   { label: 'مريض جديد', icon: '➕', path: '/new-patient' },
@@ -65,10 +103,16 @@ export default function Layout() {
 
   // شات "لابو" محفوظ هنا طول ما الـ Layout مش بيعمل remount
   // (يعني طول ما إنت جوه السيستم ومنقلتش بين الصفحات بـ refresh كامل)
-  const [chatMessages, setChatMessages] = useState([
-    { role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي تعمله وأنا هعمله فوراً!' }
-  ])
+  // وكمان بنحاول نسترجعه من sessionStorage لو المستخدم عمل refresh بالغلط في نفس التاب
+  const [chatMessages, setChatMessages] = useState(function () {
+    const stored = loadStoredChat()
+    return stored || [{ role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي تعمله وأنا هعمله فوراً!' }]
+  })
   const chatHistoryRef = useRef([])
+
+  useEffect(() => {
+    saveStoredChat(chatMessages)
+  }, [chatMessages])
 
   const [settings, setSettings] = useState(() => {
     try {
@@ -78,6 +122,70 @@ export default function Layout() {
       return { fontSize: 'medium', timeFormat: '12', darkMode: false }
     }
   })
+
+  const fetchAdminNotifications = async (userId) => {
+    try {
+      // مسح الإشعارات اللي عدى عليها أسبوع كامل
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      await supabase.from('admin_notifications').delete().lt('created_at', weekAgo)
+
+      const { data, error } = await supabase
+        .from('admin_notifications')
+        .select('*')
+        .or(`target_user_id.is.null,target_user_id.eq.${userId}`)
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      if (error) {
+        console.error('فشل جلب الإشعارات:', error)
+        return
+      }
+      setAdminNotifications(data || [])
+    } catch (err) {
+      console.error('حصل خطأ غير متوقع أثناء جلب الإشعارات:', err)
+    }
+  }
+
+  const getUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      setUser(null)
+      return
+    }
+
+    setUser(user)
+    const { data, error } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).maybeSingle()
+    if (error) {
+      console.error('فشل جلب بيانات المعمل:', error)
+    }
+    if (data) {
+      const profile = {
+        labName: data.lab_name || 'نظام إدارة المعامل الطبية',
+        doctorName: data.doctor_name || '',
+        qualification: data.qualification || '',
+        address: data.address || '',
+        phone: data.phone || '',
+        email: data.email || '',
+      }
+      setProfileData(profile)
+      setLabName(data.lab_name || 'نظام إدارة المعامل الطبية')
+
+      // فحص حالة الاشتراك وعرض بانر لو قرب/انتهى
+      const status = getSubscriptionStatus(data.subscription_expires_at)
+      setSubscriptionStatus(status)
+      if (status) {
+        const today = new Date().toDateString()
+        const dismissedOn = localStorage.getItem(`sub_banner_dismissed_${user.id}`)
+        setBannerDismissed(dismissedOn === today)
+      }
+    }
+
+    // قراءة آخر وقت فتح فيه هذا الحساب الإشعارات (محفوظ لكل حساب لوحده)
+    const savedSeenAt = localStorage.getItem(`notif_last_seen_${user.id}`)
+    setLastSeenAt(savedSeenAt)
+
+    fetchAdminNotifications(user.id)
+  }
 
   useEffect(() => {
     getUser()
@@ -127,70 +235,6 @@ export default function Layout() {
     localStorage.setItem('appSettings', JSON.stringify(newSettings))
     const sizeMap = { small: '13px', medium: '15px', large: '17px' }
     document.body.style.fontSize = sizeMap[newSettings.fontSize]
-  }
-
-  const getUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      setUser(null)
-      return
-    }
-
-    setUser(user)
-    const { data, error } = await supabase.from('lab_settings').select('*').eq('user_id', user.id).maybeSingle()
-    if (error) {
-      console.error('فشل جلب بيانات المعمل:', error)
-    }
-    if (data) {
-      const profile = {
-        labName: data.lab_name || 'نظام إدارة المعامل الطبية',
-        doctorName: data.doctor_name || '',
-        qualification: data.qualification || '',
-        address: data.address || '',
-        phone: data.phone || '',
-        email: data.email || '',
-      }
-      setProfileData(profile)
-      setLabName(data.lab_name || 'نظام إدارة المعامل الطبية')
-
-      // فحص حالة الاشتراك وعرض بانر لو قرب/انتهى
-      const status = getSubscriptionStatus(data.subscription_expires_at)
-      setSubscriptionStatus(status)
-      if (status) {
-        const today = new Date().toDateString()
-        const dismissedOn = localStorage.getItem(`sub_banner_dismissed_${user.id}`)
-        setBannerDismissed(dismissedOn === today)
-      }
-    }
-
-    // قراءة آخر وقت فتح فيه هذا الحساب الإشعارات (محفوظ لكل حساب لوحده)
-    const savedSeenAt = localStorage.getItem(`notif_last_seen_${user.id}`)
-    setLastSeenAt(savedSeenAt)
-
-    fetchAdminNotifications(user.id)
-  }
-
-  const fetchAdminNotifications = async (userId) => {
-    try {
-      // مسح الإشعارات اللي عدى عليها أسبوع كامل
-      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-      await supabase.from('admin_notifications').delete().lt('created_at', weekAgo)
-
-      const { data, error } = await supabase
-        .from('admin_notifications')
-        .select('*')
-        .or(`target_user_id.is.null,target_user_id.eq.${userId}`)
-        .order('created_at', { ascending: false })
-        .limit(10)
-
-      if (error) {
-        console.error('فشل جلب الإشعارات:', error)
-        return
-      }
-      setAdminNotifications(data || [])
-    } catch (err) {
-      console.error('حصل خطأ غير متوقع أثناء جلب الإشعارات:', err)
-    }
   }
 
   // إخفاء بانر تنبيه الاشتراك لحد بكرة (بيرجع يظهر تاني اليوم اللي بعده لو لسه المشكلة قايمة)
@@ -384,7 +428,7 @@ export default function Layout() {
               <p className="text-sm font-medium truncate" style={{ color: 'var(--on-surface)' }}>الكيميائي</p>
               <p className="text-xs truncate" style={{ color: 'var(--on-surface-variant)' }}>{user?.email}</p>
             </div>
-            <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/login' }}
+            <button onClick={async () => { clearStoredChat(); await supabase.auth.signOut(); window.location.href = '/login' }}
               className="text-xs px-2 py-1 rounded-lg flex-shrink-0"
               style={{ background: '#fee2e2', color: '#dc2626' }}>
               خروج
@@ -643,7 +687,7 @@ export default function Layout() {
               </div>
 
               <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--outline-variant)' }}>
-                <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/login' }}
+                <button onClick={async () => { clearStoredChat(); await supabase.auth.signOut(); window.location.href = '/login' }}
                   className="w-full py-2 rounded-lg text-sm font-medium"
                   style={{ background: '#fee2e2', color: '#dc2626' }}>
                   تسجيل الخروج

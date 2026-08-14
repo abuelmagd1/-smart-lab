@@ -29,8 +29,6 @@ export default function NewPatient() {
 
   useUnsavedChanges(!!(form.name.trim() || form.phone.trim() || selectedTests.length > 0 || selectedPanels.length > 0))
 
-  useEffect(() => { fetchTests(); fetchPanels() }, [])
-
   const fetchTests = async () => {
     const { data } = await supabase.from('test_catalog').select('*').order('category')
     setTestCatalog(data || [])
@@ -53,6 +51,8 @@ export default function NewPatient() {
     })
     setPanelItemsMap(map)
   }
+
+  useEffect(() => { fetchTests(); fetchPanels() }, [])
 
   const categories = ['All', ...new Set(testCatalog.map(t => t.category))]
 

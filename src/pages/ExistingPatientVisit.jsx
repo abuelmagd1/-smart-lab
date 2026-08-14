@@ -38,30 +38,6 @@ export default function ExistingPatientVisit() {
 
   useUnsavedChanges(!!(selectedProfile && (selectedTests.length > 0 || selectedPanels.length > 0)))
 
-  useEffect(() => { fetchTests(); fetchPanels() }, [])
-
-  useEffect(() => {
-    const targetId = location.state?.autoSelectProfileId
-    if (!targetId) return
-    supabase.from('patient_profiles').select('*').eq('id', targetId).maybeSingle()
-      .then(({ data, error }) => {
-        if (error) {
-          showToast('حصل خطأ أثناء تحميل بيانات المريض: ' + error.message, 'error', 5000)
-          return
-        }
-        if (data) selectProfile(data)
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state])
-
-  // بحث فوري (مع تأخير بسيط) عن ملفات المرضى بالاسم أو رقم الهاتف
-  useEffect(() => {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
-    if (!profileSearch.trim()) { setProfiles([]); return }
-    searchDebounceRef.current = setTimeout(() => searchProfiles(profileSearch.trim()), 350)
-    return () => clearTimeout(searchDebounceRef.current)
-  }, [profileSearch])
-
   const searchProfiles = async (q) => {
     setSearchingProfiles(true)
     const { data, error } = await supabase
@@ -107,6 +83,30 @@ export default function ExistingPatientVisit() {
     setSelectedTests([])
     setSelectedPanels([])
   }
+
+  useEffect(() => { fetchTests(); fetchPanels() }, [])
+
+  useEffect(() => {
+    const targetId = location.state?.autoSelectProfileId
+    if (!targetId) return
+    supabase.from('patient_profiles').select('*').eq('id', targetId).maybeSingle()
+      .then(({ data, error }) => {
+        if (error) {
+          showToast('حصل خطأ أثناء تحميل بيانات المريض: ' + error.message, 'error', 5000)
+          return
+        }
+        if (data) selectProfile(data)
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
+
+  // بحث فوري (مع تأخير بسيط) عن ملفات المرضى بالاسم أو رقم الهاتف
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    if (!profileSearch.trim()) { setProfiles([]); return }
+    searchDebounceRef.current = setTimeout(() => searchProfiles(profileSearch.trim()), 350)
+    return () => clearTimeout(searchDebounceRef.current)
+  }, [profileSearch])
 
   const changeProfile = () => {
     setSelectedProfile(null)

@@ -110,8 +110,6 @@ export default function Statistics() {
   const [savingExpense, setSavingExpense] = useState(false)
   const [deleteExpenseConfirm, setDeleteExpenseConfirm] = useState(null)
 
-  useEffect(() => { fetchAll() }, [])
-
   const fetchAll = async () => {
     setLoading(true)
     setLoadError(false)
@@ -135,6 +133,8 @@ export default function Statistics() {
     setAllExpenses(expensesRes.data || [])
     setLoading(false)
   }
+
+  useEffect(() => { fetchAll() }, [])
 
   const { start, end } = getRange(periodType, customStart, customEnd)
   const { start: prevStart, end: prevEnd } = getPreviousRange(start, end)

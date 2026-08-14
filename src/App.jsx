@@ -31,18 +31,10 @@ function App() {
   const [role, setRole] = useState(null)
   const [subscriptionStatus, setSubscriptionStatus] = useState(undefined) // undefined = لسه بنتأكد، null = مفيش تاريخ انتهاء (مفتوح)، Date = تاريخ الانتهاء
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session) fetchRole(session.user.id)
-    })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session) fetchRole(session.user.id)
-      else { setRole(null); setSubscriptionStatus(undefined) }
-    })
-    return () => listener.subscription.unsubscribe()
-  }, [])
+  const checkSubscription = async (userId) => {
+    const { data } = await supabase.from('lab_settings').select('subscription_expires_at').eq('user_id', userId).maybeSingle()
+    setSubscriptionStatus(data?.subscription_expires_at ? new Date(data.subscription_expires_at) : null)
+  }
 
   const fetchRole = async (userId) => {
     const { data, error } = await supabase.from('profiles').select('role').eq('id', userId).maybeSingle()
@@ -59,10 +51,18 @@ function App() {
     }
   }
 
-  const checkSubscription = async (userId) => {
-    const { data } = await supabase.from('lab_settings').select('subscription_expires_at').eq('user_id', userId).maybeSingle()
-    setSubscriptionStatus(data?.subscription_expires_at ? new Date(data.subscription_expires_at) : null)
-  }
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      if (session) fetchRole(session.user.id)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      if (session) fetchRole(session.user.id)
+      else { setRole(null); setSubscriptionStatus(undefined) }
+    })
+    return () => listener.subscription.unsubscribe()
+  }, [])
 
   const isSubscriptionExpired = role === 'doctor' && subscriptionStatus instanceof Date && subscriptionStatus.getTime() < Date.now()
 

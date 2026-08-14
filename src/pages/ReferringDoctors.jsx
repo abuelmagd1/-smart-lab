@@ -18,6 +18,19 @@ export default function ReferringDoctors() {
 
   const nameInputRef = useRef(null)
 
+  const fetchAll = async () => {
+    setLoading(true)
+    const [doctorsRes, patientsRes] = await Promise.all([
+      supabase.from('referring_doctors').select('*').order('name'),
+      supabase.from('patients').select('id, doctor, created_at, tests(price, panel_instance_id)'),
+    ])
+    if (doctorsRes.error) showToast('فشل تحميل قائمة الأطباء: ' + doctorsRes.error.message, 'error')
+    if (patientsRes.error) showToast('فشل تحميل بيانات المرضى: ' + patientsRes.error.message, 'error')
+    setDoctors(doctorsRes.data || [])
+    setPatients(patientsRes.data || [])
+    setLoading(false)
+  }
+
   useEffect(() => { fetchAll() }, [])
 
   // إغلاق أي مودال مفتوح بزرار Escape - تجربة استخدام أفضل من غير ما تلمس الماوس
@@ -36,19 +49,6 @@ export default function ReferringDoctors() {
   useEffect(() => {
     if (editDoctor && nameInputRef.current) nameInputRef.current.focus()
   }, [editDoctor])
-
-  const fetchAll = async () => {
-    setLoading(true)
-    const [doctorsRes, patientsRes] = await Promise.all([
-      supabase.from('referring_doctors').select('*').order('name'),
-      supabase.from('patients').select('id, doctor, created_at, tests(price, panel_instance_id)'),
-    ])
-    if (doctorsRes.error) showToast('فشل تحميل قائمة الأطباء: ' + doctorsRes.error.message, 'error')
-    if (patientsRes.error) showToast('فشل تحميل بيانات المرضى: ' + patientsRes.error.message, 'error')
-    setDoctors(doctorsRes.data || [])
-    setPatients(patientsRes.data || [])
-    setLoading(false)
-  }
 
   const filteredPatients = patients.filter(p =>
     periodFilter === 'all' || getDateBucket(p.created_at) === periodFilter

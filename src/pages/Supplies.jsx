@@ -21,6 +21,13 @@ export default function Supplies() {
   const nameInputRef = useRef(null)
   const amountInputRef = useRef(null)
 
+  const fetchSupplies = async () => {
+    const { data, error } = await supabase.from('lab_supplies').select('*').order('name')
+    if (error) showToast('فشل تحميل المستلزمات: ' + error.message, 'error')
+    setSupplies(data || [])
+    setLoading(false)
+  }
+
   useEffect(() => { fetchSupplies() }, [])
 
   // إغلاق أي مودال مفتوح بزرار Escape - تجربة استخدام أفضل من غير ما تلمس الماوس
@@ -43,13 +50,6 @@ export default function Supplies() {
   useEffect(() => {
     if (adjustItem && amountInputRef.current) amountInputRef.current.focus()
   }, [adjustItem])
-
-  const fetchSupplies = async () => {
-    const { data, error } = await supabase.from('lab_supplies').select('*').order('name')
-    if (error) showToast('فشل تحميل المستلزمات: ' + error.message, 'error')
-    setSupplies(data || [])
-    setLoading(false)
-  }
 
   const isLow = (s) => Number(s.current_quantity) <= Number(s.minimum_threshold)
 

@@ -209,11 +209,6 @@ export default function PatientPortal() {
   const [notFound, setNotFound] = useState(false)
   const barcodeCanvasRef = useRef(null)
 
-  useEffect(() => {
-    fetchData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code])
-
   const fetchData = async () => {
     setLoading(true)
     setNotFound(false)
@@ -226,6 +221,11 @@ export default function PatientPortal() {
     setData(result)
     setLoading(false)
   }
+
+  useEffect(() => {
+    fetchData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code])
 
   useEffect(() => {
     if (data?.barcode_seq && barcodeCanvasRef.current) {

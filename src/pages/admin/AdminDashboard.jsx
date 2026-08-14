@@ -45,8 +45,6 @@ export default function AdminDashboard() {
   // رسالة تأكيد/خطأ عامة تظهر فوق الصفحة بعد أي عملية (حفظ/حذف/تجديد/تفعيل)
   const [feedback, setFeedback] = useState({ text: '', type: '' })
 
-  useEffect(() => { fetchLabs() }, [])
-
   const showFeedback = (text, type = 'success') => {
     setFeedback({ text, type })
     setTimeout(() => setFeedback({ text: '', type: '' }), 3500)
@@ -63,6 +61,8 @@ export default function AdminDashboard() {
     setLabs(data || [])
     setLoading(false)
   }
+
+  useEffect(() => { fetchLabs() }, [])
 
   // بيرفض (reject) لو فشلت قراءة الملف أو معالجته، بدل ما يعلّق للأبد من غير أي رسالة خطأ
   const compressImage = (file, maxSize = 300, quality = 0.75) => {

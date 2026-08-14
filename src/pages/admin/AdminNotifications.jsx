@@ -9,8 +9,6 @@ export default function AdminNotifications() {
   const [success, setSuccess] = useState(false)
   const [form, setForm] = useState({ title: '', message: '', target: 'all' })
 
-  useEffect(() => { fetchData() }, [])
-
   const fetchData = async () => {
     // مسح الإشعارات اللي عدى عليها أسبوع كامل
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
@@ -30,6 +28,8 @@ export default function AdminNotifications() {
 
     setLoading(false)
   }
+
+  useEffect(() => { fetchData() }, [])
 
   const sendNotification = async () => {
     if (!form.title || !form.message) return alert('من فضلك ادخل العنوان والرسالة')

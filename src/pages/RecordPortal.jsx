@@ -206,11 +206,6 @@ export default function RecordPortal() {
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const reportRef = useRef(null)
 
-  useEffect(() => {
-    fetchData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code])
-
   const fetchData = async () => {
     setLoading(true)
     setNotFound(false)
@@ -223,6 +218,11 @@ export default function RecordPortal() {
     setData(result)
     setLoading(false)
   }
+
+  useEffect(() => {
+    fetchData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code])
 
   // بيطبع الصفحة مباشرة من غير ما يفتح أي تاب أو نافذة جديدة - أضمن طريقة، مفيش خطر
   // إن التطبيق يتعلق لما ترجعله (زي ما كان بيحصل مع window.open)

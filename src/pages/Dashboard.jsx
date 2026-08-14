@@ -85,12 +85,6 @@ export default function Dashboard() {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 250)
 
-  useEffect(() => {
-    fetchData()
-    const timer = setInterval(() => setNow(new Date()), 60000)
-    return () => clearInterval(timer)
-  }, [])
-
   const fetchData = async () => {
     setLoadError(false)
     const { data, error } = await supabase
@@ -109,6 +103,12 @@ export default function Dashboard() {
     setPatients(data || [])
     setLoading(false)
   }
+
+  useEffect(() => {
+    fetchData()
+    const timer = setInterval(() => setNow(new Date()), 60000)
+    return () => clearInterval(timer)
+  }, [])
 
   const getFormattedDate = () => {
     const day = dayNames[now.getDay()]

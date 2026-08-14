@@ -173,24 +173,6 @@ export default function Reports() {
   const printFrameRef = useRef(null)
   const pdfContentRef = useRef(null)
 
-  useEffect(() => { fetchPatients(); fetchSettings() }, [])
-
-  useEffect(() => {
-    const targetId = location.state?.autoSelectPatientId
-    if (!loading && targetId && patients.length) {
-      const match = patients.find(p => p.id === targetId)
-      if (match) setSelectedPatient(match)
-    }
-  }, [loading, patients, location.state])
-
-  useEffect(() => {
-    if (selectedPatient) {
-      fetchHistory(selectedPatient)
-    } else {
-      setHistoryRows([])
-    }
-  }, [selectedPatient])
-
   const fetchPatients = async () => {
     const { data, error } = await supabase
       .from('patients')
@@ -249,6 +231,24 @@ export default function Reports() {
     }
     setHistoryRows(rows)
   }
+
+  useEffect(() => { fetchPatients(); fetchSettings() }, [])
+
+  useEffect(() => {
+    const targetId = location.state?.autoSelectPatientId
+    if (!loading && targetId && patients.length) {
+      const match = patients.find(p => p.id === targetId)
+      if (match) setSelectedPatient(match)
+    }
+  }, [loading, patients, location.state])
+
+  useEffect(() => {
+    if (selectedPatient) {
+      fetchHistory(selectedPatient)
+    } else {
+      setHistoryRows([])
+    }
+  }, [selectedPatient])
 
   const saveDesign = async () => {
     setSavingDesign(true)
