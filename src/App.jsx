@@ -8,7 +8,6 @@ import SessionWatcher from './components/SessionWatcher'
 import ReferringDoctors from './pages/ReferringDoctors'
 import Supplies from './pages/Supplies'
 import PatientPortal from './pages/PatientPortal'
-import RecordPortal from './pages/RecordPortal'
 
 
 const Login = lazy(() => import('./pages/Login'))
@@ -20,6 +19,7 @@ const Results = lazy(() => import('./pages/Results'))
 const AIAssistant = lazy(() => import('./pages/AIAssistant'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Statistics = lazy(() => import('./pages/Statistics'))
+const RecordPortal = lazy(() => import('./pages/RecordPortal'))
 const Layout = lazy(() => import('./components/Layout'))
 const AdminLayout = lazy(() => import('./components/AdminLayout'))
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))

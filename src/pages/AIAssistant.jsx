@@ -1314,30 +1314,51 @@ export default function AIAssistant() {
     const decoder = new TextDecoder()
     let buffer = ''
 
-    while (true) {
-      const chunk = await reader.read()
-      if (chunk.done) break
-      buffer += decoder.decode(chunk.value, { stream: true })
+    try {
+      while (true) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        buffer += decoder.decode(chunk.value, { stream: true })
 
-      let sepIndex
-      while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
-        const rawEvent = buffer.slice(0, sepIndex)
-        buffer = buffer.slice(sepIndex + 2)
-        if (!rawEvent.trim()) continue
+        let sepIndex
+        while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+          const rawEvent = buffer.slice(0, sepIndex)
+          buffer = buffer.slice(sepIndex + 2)
+          if (!rawEvent.trim()) continue
 
-        let eventType = null
-        let dataStr = ''
-        rawEvent.split('\n').forEach(function (line) {
-          if (line.indexOf('event:') === 0) eventType = line.slice(6).trim()
-          else if (line.indexOf('data:') === 0) dataStr += line.slice(5).trim()
-        })
+          let eventType = null
+          let dataStr = ''
+          rawEvent.split('\n').forEach(function (line) {
+            if (line.indexOf('event:') === 0) eventType = line.slice(6).trim()
+            else if (line.indexOf('data:') === 0) dataStr += line.slice(5).trim()
+          })
 
-        if (dataStr) {
-          let data
-          try { data = JSON.parse(dataStr) } catch { continue }
-          handleSSEEvent(eventType, data)
+          if (dataStr) {
+            let data
+            try { data = JSON.parse(dataStr) } catch { continue }
+            handleSSEEvent(eventType, data)
+          }
         }
       }
+    } catch (streamErr) {
+      if (streamErr.name === 'AbortError') throw streamErr
+
+      // Gemini ممكن ترجع 200 OK وتبدأ الـ stream عادي، وبعدين تبعت event من نوع "error" لوحده
+      // جوه نفس الـ stream (زي "الموديل مزدحم دلوقتي") - ده مختلف عن رفض الطلب من الأول (اللي
+      // بيتعامل معاه فوق). لو ده حصل *قبل* ما أي نص يتعرض فعليًا للمستخدم، نقدر نبدّل موديل
+      // بديل بأمان زي بالظبط لما الطلب يترفض من الأول. لو حصل *بعد* ما جزء من الرد ظهر فعلاً،
+      // مش هنبدّل موديل بصمت (هيبقى مربك) - هنعرض رسالة الخطأ عادي.
+      const apiErrorMsg = streamErr.message || 'غير معروف'
+      const isOverloaded = /overloaded|high demand|503/i.test(apiErrorMsg)
+      const isQuotaExceeded = /quota|rate.?limit|resource_exhausted/i.test(apiErrorMsg)
+      if (isOverloaded || isQuotaExceeded) markModelCooldown(modelToUse)
+
+      if ((isOverloaded || isQuotaExceeded) && modelIndex < MODEL_CHAIN.length - 1 && !streamState.text) {
+        showStatus('🔄 موديل "' + modelToUse + '" ' + (isQuotaExceeded ? 'خلصت حصته المجانية دلوقتي' : 'مشغول دلوقتي') + '، بيجرب موديل بديل...')
+        return runAssistantTurn(signal, inputPayload, patientsPromise, depth, streamState, modelIndex + 1)
+      }
+
+      throw streamErr
     }
 
     if (streamState.flushTimer) {
@@ -2397,7 +2418,7 @@ export default function AIAssistant() {
       )}
 
       <div className="py-4 flex gap-3 items-end" style={{ borderTop: pendingImages.length > 0 ? 'none' : '1px solid var(--outline-variant)' }}>
-        <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageFilesSelected} style={{ display: 'none' }} />
+        <input ref={fileInputRef} id="labo-image-upload" name="labo-image-upload" type="file" accept="image/*" multiple onChange={handleImageFilesSelected} style={{ display: 'none' }} />
 
         <button onClick={handleImageButtonClick} aria-label="إرفاق صورة" disabled={pendingImages.length >= MAX_IMAGES}
           className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
@@ -2415,7 +2436,7 @@ export default function AIAssistant() {
           <span className="text-xs font-medium self-center" style={{ color: '#dc2626' }}>{formatTimer(recordingSeconds)}</span>
         )}
 
-        <textarea ref={textareaRef} value={input} rows={1}
+        <textarea ref={textareaRef} id="labo-chat-input" name="labo-chat-input" value={input} rows={1}
           onChange={handleInputChange}
           onKeyDown={handleInputKeyDown}
           placeholder="اكتب سؤالك أو أمرك هنا... (Shift+Enter لسطر جديد)"
