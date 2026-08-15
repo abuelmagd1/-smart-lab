@@ -191,12 +191,85 @@ const renderMarkdown = (text) => {
 const formatClock = (ts) => ts ? new Date(ts).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : ''
 const formatTimer = (s) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
 
+// بيلف على الأرقام في نص الرد ويحوّطها بـ span قابل للنسخ بضغطة واحدة. بيشتغل على عقد
+// النص (text nodes) بس بعد ما renderMarkdown يخلص، عشان محدش يلمس الـ HTML tags أو أي
+// أرقام جوه attributes (زي font-size) ويبوظها
+const NUMBER_PATTERN = /\b\d+(?:\.\d+)?\b/g
+const wrapCopyableNumbers = (html) => {
+  if (typeof document === 'undefined' || !html) return html
+  try {
+    const container = document.createElement('div')
+    container.innerHTML = html
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null)
+    const textNodes = []
+    let node = walker.nextNode()
+    while (node) { textNodes.push(node); node = walker.nextNode() }
+
+    textNodes.forEach(function (textNode) {
+      const text = textNode.nodeValue
+      NUMBER_PATTERN.lastIndex = 0
+      if (!NUMBER_PATTERN.test(text)) return
+      NUMBER_PATTERN.lastIndex = 0
+
+      const frag = document.createDocumentFragment()
+      let lastIndex = 0
+      let m = NUMBER_PATTERN.exec(text)
+      while (m) {
+        if (m.index > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, m.index)))
+        const span = document.createElement('span')
+        span.className = 'labo-copyable-num'
+        span.setAttribute('data-copy-value', m[0])
+        span.title = 'دوس لنسخ الرقم'
+        span.style.cursor = 'pointer'
+        span.style.borderBottom = '1px dashed currentColor'
+        span.textContent = m[0]
+        frag.appendChild(span)
+        lastIndex = m.index + m[0].length
+        m = NUMBER_PATTERN.exec(text)
+      }
+      if (lastIndex < text.length) frag.appendChild(document.createTextNode(text.slice(lastIndex)))
+      textNode.parentNode.replaceChild(frag, textNode)
+    })
+
+    return container.innerHTML
+  } catch {
+    return html // أي مشكلة غير متوقعة، نرجع النص الأصلي زي ما هو من غير ما نكسر عرض الرسالة
+  }
+}
+
 const SUGGESTIONS = ['سجّل مريض جديد', 'إيه أسباب ارتفاع السكر؟', 'اعرض حالة مريض معين', 'افتح تقرير مريض للطباعة']
 
 const MAX_RECORDING_MS = 120000
 const MAX_IMAGES = 4
 const MAX_IMAGE_MB = 8
 const AUTO_RESET_AFTER_TURNS = 8 // بعد كل 8 ردود، نبدأ سياق جديد مع Gemini عشان الرد يفضل سريع
+
+// حماية استباقية من حد الطلبات في الدقيقة (RPM) بتاعت الخطة المجانية. بدل ما نستنى
+// Gemini يرفض الطلب بخطأ 429 ونحاول تاني، بنعدّ إحنا نفسنا كام طلب فعلي راح في آخر 60
+// ثانية (عبر كل استخدامات لابو: رد عادي، أداة، صوت TTS، تفريغ صوتي، بحث)، ولو قربنا من
+// الحد بننتظر شوية قبل ما نبعت الطلب الجديد بدل ما "نضرب" في الحد ونضيع محاولة كاملة.
+const RATE_LIMIT_WINDOW_MS = 60000
+const RATE_LIMIT_MAX_REQUESTS = 8 // محافظ عمدًا تحت أي حد شائع لخطط Gemini المجانية (بيسيب هامش أمان)
+let geminiRequestTimestamps = []
+
+const waitForRateLimitSlot = async (signal) => {
+  while (true) {
+    if (signal && signal.aborted) {
+      const abortErr = new Error('تم الإلغاء')
+      abortErr.name = 'AbortError'
+      throw abortErr
+    }
+    const now = Date.now()
+    geminiRequestTimestamps = geminiRequestTimestamps.filter(function (t) { return now - t < RATE_LIMIT_WINDOW_MS })
+    if (geminiRequestTimestamps.length < RATE_LIMIT_MAX_REQUESTS) {
+      geminiRequestTimestamps.push(now)
+      return
+    }
+    const oldest = geminiRequestTimestamps[0]
+    const waitMs = RATE_LIMIT_WINDOW_MS - (now - oldest) + 200
+    await new Promise(function (r) { setTimeout(r, Math.max(waitMs, 200)) })
+  }
+}
 
 const fetchWithTimeout = async (url, options, timeoutMs) => {
   options = options || {}
@@ -236,6 +309,8 @@ const safeJson = async (response) => {
 
 // بيكلم Supabase Edge Function (gemini-proxy) بدل ما يكلم Gemini مباشرة - المفتاح بقى محفوظ سيرفر-سايد بس
 const callGeminiProxy = async (path, body, signal, timeoutMs) => {
+  await waitForRateLimitSlot(signal)
+
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) throw new Error('لازم تسجّل دخول عشان تستخدم المساعد الذكي')
 
@@ -729,8 +804,17 @@ const findQuickNavCommand = (userText) => {
   return page || null
 }
 
-// أدوات نتيجتها واضحة بذاتها ومش محتاجة "جولة تانية" مع الموديل عشان يلخصها
-const SKIP_FOLLOWUP_TOOLS = ['generate_financial_report', 'open_patient_report', 'generate_document_pdf']
+// أدوات نتيجتها واضحة بذاتها ومش محتاجة "جولة تانية" مع الموديل عشان يلخصها -
+// كل أداة هنا نتيجتها جاهزة كرسالة كاملة، وأي جولة تانية بعدها هتاكل طلب إضافي من
+// حصة الـ RPM المجانية من غير أي فايدة حقيقية للمستخدم. الأدوات اللي محتاجة تحليل أو
+// إجابة عن سؤال محدد باستخدام البيانات (زي find_patient, list_patients, doctor_stats,
+// list_expenses, search_medical_info) مستبعدة عمدًا من القائمة دي لإن دورها الأساسي
+// إنها تجيب بيانات خام والموديل يستخدمها يجاوب على سؤال المستخدم بالظبط.
+const SKIP_FOLLOWUP_TOOLS = [
+  'generate_financial_report', 'open_patient_report', 'generate_document_pdf',
+  'propose_new_patient', 'propose_test_result', 'propose_update_patient', 'propose_delete_patient',
+  'add_tests_to_patient', 'manage_supply', 'add_expense', 'send_admin_notification', 'manage_test_catalog'
+]
 
 const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات (طب، علوم، تاريخ، تكنولوجيا، رياضة، فن، حياة عامة... أي موضوع).\n\n' +
   'شخصيتك:\n' +
@@ -804,6 +888,7 @@ export default function AIAssistant() {
   const turnCountRef = useRef(0)
   const testCatalogCacheRef = useRef({ data: null, ts: 0 }) // كاش بسيط لكتالوج التحاليل - بيتغير نادرًا فمفيش داعي نسحبه من الداتابيز في كل أداة محتاجاه
   const modelCooldownRef = useRef({}) // { modelName: timestamp لحد امتى نتجنبه } - circuit breaker بسيط
+  const contextDigestRef = useRef('') // ملخص محلي (بدون Gemini) لآخر كام رسالة قبل ما نبدأ سياق جديد، بيتحقن مرة واحدة في أول رسالة بعد الريست
   const [isOnline, setIsOnline] = useState(function () { return typeof navigator === 'undefined' || navigator.onLine })
   const [serviceDegraded, setServiceDegraded] = useState(false)
 
@@ -873,6 +958,21 @@ export default function AIAssistant() {
   }
   const invalidateTestCatalogCache = () => { testCatalogCacheRef.current = { data: null, ts: 0 } }
 
+  // ملخص محلي بسيط لآخر كام رسالة، من غير أي استدعاء لـ Gemini خالص - الهدف نحافظ على شوية
+  // سياق لما نضطر نفتح محادثة جديدة مع الموديل (بدل ما ينسى كل حاجة فجأة) من غير ما نستهلك
+  // طلب إضافي من حصة الـ RPM في سبيل التلخيص نفسه
+  const buildLocalDigest = (msgs) => {
+    const relevant = (msgs || []).filter(function (m) {
+      return (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content
+    }).slice(-6)
+    if (!relevant.length) return ''
+    const lines = relevant.map(function (m) {
+      const who = m.role === 'user' ? 'المستخدم' : 'لابو'
+      return who + ': ' + m.content.slice(0, 120)
+    })
+    return lines.join('\n').slice(0, 600)
+  }
+
   const stopSpeaking = () => {
     speakCancelledRef.current = true
     if (currentAudioRef.current) { currentAudioRef.current.pause(); currentAudioRef.current = null }
@@ -893,6 +993,16 @@ export default function AIAssistant() {
     if (navigator.clipboard) navigator.clipboard.writeText(content)
     setCopiedIndex(i)
     setTimeout(function () { setCopiedIndex(null) }, 1500)
+  }
+
+  // نسخ رقم واحد بضغطة لما المستخدم يدوس على أي رقم متحوّط جوه رد لابو (شوف wrapCopyableNumbers)
+  const handleAssistantBubbleClick = (e) => {
+    const target = e.target
+    if (!target || !target.classList || !target.classList.contains('labo-copyable-num')) return
+    const value = target.getAttribute('data-copy-value')
+    if (!value) return
+    if (navigator.clipboard) navigator.clipboard.writeText(value)
+    showToast('تم نسخ ' + value + ' ✅', 'success', 1500)
   }
 
   const adjustTextareaHeight = () => {
@@ -1048,9 +1158,10 @@ export default function AIAssistant() {
 
     turnCountRef.current += 1
     if (turnCountRef.current > AUTO_RESET_AFTER_TURNS && historyRef.current.previousId) {
+      contextDigestRef.current = buildLocalDigest(messages)
       historyRef.current.previousId = null
       turnCountRef.current = 1
-      showStatus('🔄 بدأت سياق جديد مع لابو عشان الرد يفضل سريع (بيانات المرضى والتحاليل زي ما هي، بس نسي تفاصيل كلامنا القديم في المحادثة دي)')
+      showStatus('🔄 بدأت سياق جديد مع لابو عشان الرد يفضل سريع (بيانات المرضى والتحاليل زي ما هي، وفاكر ملخص مختصر لآخر كلامنا)')
     }
 
     const controller = new AbortController()
@@ -1061,7 +1172,12 @@ export default function AIAssistant() {
       // الأول - البيانات مش هتتستخدم فعليًا إلا لو الموديل قرر ينادي أداة محتاجاها،
       // وده بيوفر رحلة كاملة للداتابيز على كل رسالة عادية (زي "إزيك" أو سؤال عام)
       const patientsPromise = getPatientsLight()
-      const contentBlocks = [{ type: 'text', text: userMessageText }]
+      let effectiveText = userMessageText
+      if (contextDigestRef.current) {
+        effectiveText = '(ملخص مختصر للسياق اللي فات قبل ما يتفتح سياق جديد:\n' + contextDigestRef.current + ')\n\nسؤال/طلب المستخدم الحالي: ' + userMessageText
+        contextDigestRef.current = ''
+      }
+      const contentBlocks = [{ type: 'text', text: effectiveText }]
       imagesToSend.forEach(function (img) {
         contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
       })
@@ -1135,6 +1251,8 @@ export default function AIAssistant() {
       stream: true
     }
     if (historyRef.current.previousId) body.previous_interaction_id = historyRef.current.previousId
+
+    await waitForRateLimitSlot(signal)
 
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error('لازم تسجّل دخول عشان تستخدم المساعد الذكي')
@@ -1243,7 +1361,7 @@ export default function AIAssistant() {
         const fc = functionCallsMap[functionCallOrder[index]]
         let args = {}
         try { args = fc.argsText ? JSON.parse(fc.argsText) : {} } catch { /* args تفضل {} لو الـ JSON مش سليم */ }
-        const meta = { reportUrl: null, forceFollowup: false, pdfData: null }
+        const meta = { reportUrl: null, forceFollowup: false, pdfData: null, undo: null }
         let resultText
         try {
           resultText = await handleToolCall({ name: fc.name, id: fc.id, arguments: args }, signal, resolvedPatients, meta)
@@ -1251,10 +1369,42 @@ export default function AIAssistant() {
           if (err.name === 'AbortError') throw err
           resultText = 'حصل خطأ غير متوقع في تنفيذ هذه العملية: ' + err.message
         }
-        return { name: fc.name, id: fc.id, resultText: resultText, meta: meta }
+        return { name: fc.name, resultText: resultText, meta: meta }
       }
 
-      const outcomes = await Promise.all(functionCallOrder.map(function (_, index) { return execOne(index) }))
+      // لو الموديل غلط ونادى نفس الأداة بنفس المدخلات بالظبط أكتر من مرة في نفس الرد،
+      // بننفذها مرة واحدة بس - ده بيمنع تكرار عملية حقيقية (زي إضافة نفس المصروف مرتين)
+      // وبيوفر طلب زيادة من حصة الـ RPM
+      const dedupGroups = []
+      const groupIndexByKey = {}
+      let duplicatesSkipped = 0
+      functionCallOrder.forEach(function (_, index) {
+        const fc = functionCallsMap[functionCallOrder[index]]
+        const key = fc.name + '|' + (fc.argsText || '')
+        if (groupIndexByKey[key] === undefined) {
+          groupIndexByKey[key] = dedupGroups.length
+          dedupGroups.push({ firstIndex: index, indices: [index] })
+        } else {
+          dedupGroups[groupIndexByKey[key]].indices.push(index)
+          duplicatesSkipped++
+        }
+      })
+      if (duplicatesSkipped > 0) {
+        showStatus('ℹ️ تجاهلت ' + duplicatesSkipped + ' استدعاء مكرر بنفس البيانات بالظبط')
+      }
+
+      const groupResults = await Promise.all(dedupGroups.map(async function (group) {
+        const result = await execOne(group.firstIndex)
+        return { group: group, result: result }
+      }))
+
+      const outcomes = new Array(functionCallOrder.length)
+      groupResults.forEach(function (gr) {
+        gr.group.indices.forEach(function (idx) {
+          const fc = functionCallsMap[functionCallOrder[idx]]
+          outcomes[idx] = { name: gr.result.name, id: fc.id, resultText: gr.result.resultText, meta: gr.result.meta }
+        })
+      })
 
       const functionResults = []
       const executedNames = []
@@ -1270,6 +1420,7 @@ export default function AIAssistant() {
         // عبر كل جولات الاستدعاء المتكررة)، عشان نقدر نعرض زرار "حوّل لـ PDF" تحت الرد
         // النهائي أيًا كان شكله - بدون أي اعتماد على قرار الموديل يستدعي أداة تانية
         if (outcome.meta.pdfData) streamState.pdfData = outcome.meta.pdfData
+        if (outcome.meta.undo) streamState.undo = { info: outcome.meta.undo, expiresAt: Date.now() + 30000 }
         functionResults.push({
           type: 'function_result',
           name: outcome.name,
@@ -1282,7 +1433,10 @@ export default function AIAssistant() {
       // الموديل يصحّح نفسه بدل ما نعرض رسالة فاضية أو تقرير بلا محتوى للمستخدم
       const allSkippable = !forceFollowup && executedNames.length > 0 && executedNames.every(function (n) { return SKIP_FOLLOWUP_TOOLS.indexOf(n) !== -1 })
       if (allSkippable) {
-        setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: lastVisibleResult, time: Date.now(), reportUrl: reportUrl, pdfData: streamState.pdfData }]) })
+        setMessages(function (prev) { return prev.concat([{
+          role: 'assistant', content: lastVisibleResult, time: Date.now(), reportUrl: reportUrl, pdfData: streamState.pdfData,
+          undo: streamState.undo ? streamState.undo.info : null, undoExpiresAt: streamState.undo ? streamState.undo.expiresAt : null
+        }]) })
         historyRef.current.previousId = null
         return
       }
@@ -1293,12 +1447,14 @@ export default function AIAssistant() {
 
     if (!streamState.text) {
       setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'حدث خطأ، حاول مرة أخرى.', time: Date.now() }]) })
-    } else if (streamState.pdfData && streamState.id) {
-      // خلصت كل الجولات وفيه بيانات قايمة اتجابت خلال المحادثة دي - نلزّق زرار "حوّل لـ PDF"
-      // تحت الرد النهائي اللي اتعمله streaming، مهما كان نص الرد نفسه إيه
+    } else if ((streamState.pdfData || streamState.undo) && streamState.id) {
+      // خلصت كل الجولات وفيه بيانات قايمة أو عملية قابلة للتراجع اتجابت خلال المحادثة دي -
+      // نلزّق الأزرار المناسبة تحت الرد النهائي اللي اتعمله streaming، مهما كان نص الرد نفسه إيه
       const sid = streamState.id
       const pdfData = streamState.pdfData
-      setMessages(function (prev) { return prev.map(function (m) { return m.streamId === sid ? Object.assign({}, m, { pdfData: pdfData }) : m }) })
+      const undoInfo = streamState.undo ? streamState.undo.info : null
+      const undoExpiresAt = streamState.undo ? streamState.undo.expiresAt : null
+      setMessages(function (prev) { return prev.map(function (m) { return m.streamId === sid ? Object.assign({}, m, { pdfData: pdfData, undo: undoInfo, undoExpiresAt: undoExpiresAt }) : m }) })
     }
   }
 
@@ -1343,6 +1499,35 @@ export default function AIAssistant() {
       setTimeout(function () { URL.revokeObjectURL(url) }, 60000)
     } catch (err) {
       showToast('حصل خطأ أثناء تجهيز الملف: ' + err.message, 'error')
+    }
+  }
+
+  // بيرجّع آخر عملية كتابة نفّذها لابو تلقائيًا (مصروف/مستلزم/إشعار/تحليل/كتالوج) - بيشتغل
+  // بكود عادي مباشر على Supabase من غير أي مرور على Gemini خالص
+  const performUndo = async (index, undoInfo, expiresAt) => {
+    if (expiresAt && Date.now() > expiresAt) {
+      showToast('انتهت مهلة التراجع (30 ثانية)', 'warning')
+      return
+    }
+    setMessages(function (prev) { return prev.map(function (m, i) { return i === index ? Object.assign({}, m, { undoStatus: 'loading' }) : m }) })
+    try {
+      if (undoInfo.kind === 'delete_rows') {
+        const res = await supabase.from(undoInfo.table).delete().in('id', undoInfo.ids)
+        if (res.error) throw res.error
+      } else if (undoInfo.kind === 'reverse_supply_movement') {
+        const updateRes = await supabase.from('lab_supplies').update({ current_quantity: undoInfo.previousQuantity }).eq('id', undoInfo.supplyId)
+        if (updateRes.error) throw updateRes.error
+        if (undoInfo.movementId) await supabase.from('lab_supply_movements').delete().eq('id', undoInfo.movementId)
+      } else if (undoInfo.kind === 'restore_fields') {
+        const res = await supabase.from(undoInfo.table).update(undoInfo.previousValues).eq('id', undoInfo.id)
+        if (res.error) throw res.error
+        if (undoInfo.table === 'test_catalog') invalidateTestCatalogCache()
+      }
+      setMessages(function (prev) { return prev.map(function (m, i) { return i === index ? Object.assign({}, m, { undoStatus: 'done' }) : m }) })
+      showToast('تم التراجع ✅', 'success')
+    } catch (err) {
+      setMessages(function (prev) { return prev.map(function (m, i) { return i === index ? Object.assign({}, m, { undoStatus: 'error' }) : m }) })
+      showToast('فشل التراجع: ' + err.message, 'error')
     }
   }
 
@@ -1422,7 +1607,10 @@ export default function AIAssistant() {
         const testsToInsert = matchResult.matched.map(function (t) {
           return { patient_id: resolved.match.id, name: t.name, normal_range: t.normal_range, unit: t.unit, status: 'تم التجميع' }
         })
-        await supabase.from('tests').insert(testsToInsert)
+        const insertRes = await supabase.from('tests').insert(testsToInsert).select('id')
+        if (insertRes.error) throw insertRes.error
+        const insertedIds = (insertRes.data || []).map(function (r) { return r.id })
+        if (meta && insertedIds.length) meta.undo = { kind: 'delete_rows', table: 'tests', ids: insertedIds, label: 'تراجع عن إضافة التحاليل' }
 
         let msg = 'تم إضافة ' + matchResult.matched.length + ' تحليل للمريض "' + resolved.match.name + '"'
         if (matchResult.notFound.length) msg += '. تنبيه: التحاليل دي مش موجودة في قائمة التحاليل المعتمدة فتم تسجيلها من غير معدل طبيعي محدد: ' + matchResult.notFound.join(', ')
@@ -1464,8 +1652,10 @@ export default function AIAssistant() {
             current_quantity: args.initial_quantity || 0,
             minimum_threshold: args.minimum_threshold || 0,
             supplier: args.supplier || null,
-          }])
+          }]).select('id')
           if (insertRes.error) throw insertRes.error
+          const newId = insertRes.data && insertRes.data[0] && insertRes.data[0].id
+          if (meta && newId) meta.undo = { kind: 'delete_rows', table: 'lab_supplies', ids: [newId], label: 'تراجع عن إضافة الصنف' }
           return 'تم إضافة صنف "' + args.name + '" للمستلزمات بكمية ' + (args.initial_quantity || 0) + '.'
         }
 
@@ -1479,7 +1669,11 @@ export default function AIAssistant() {
           if (newQty < 0) return 'الكمية المطلوبة أكبر من المتاح فعليًا (' + supply.current_quantity + ').'
           const updateRes = await supabase.from('lab_supplies').update({ current_quantity: newQty }).eq('id', supply.id)
           if (updateRes.error) throw updateRes.error
-          await supabase.from('lab_supply_movements').insert([{ supply_id: supply.id, change_amount: signedAmount, reason: args.reason || (action === 'restock' ? 'إضافة عبر لابو' : 'استهلاك عبر لابو') }])
+          const movementRes = await supabase.from('lab_supply_movements').insert([{ supply_id: supply.id, change_amount: signedAmount, reason: args.reason || (action === 'restock' ? 'إضافة عبر لابو' : 'استهلاك عبر لابو') }]).select('id')
+          if (meta) meta.undo = {
+            kind: 'reverse_supply_movement', supplyId: supply.id, previousQuantity: Number(supply.current_quantity),
+            movementId: movementRes.data && movementRes.data[0] && movementRes.data[0].id, label: 'تراجع عن ' + (action === 'restock' ? 'الإضافة' : 'الخصم')
+          }
           return 'تم ' + (action === 'restock' ? 'إضافة' : 'خصم') + ' ' + args.amount + ' من "' + supply.name + '". الرصيد الحالي: ' + newQty + ' ' + (supply.unit || '')
         }
 
@@ -1501,8 +1695,10 @@ export default function AIAssistant() {
           description: args.description || null,
           expense_date: args.expense_date || new Date().toISOString().slice(0, 10),
         }
-        const res = await supabase.from('lab_expenses').insert([payload])
+        const res = await supabase.from('lab_expenses').insert([payload]).select('id')
         if (res.error) throw res.error
+        const newId = res.data && res.data[0] && res.data[0].id
+        if (meta && newId) meta.undo = { kind: 'delete_rows', table: 'lab_expenses', ids: [newId], label: 'تراجع عن تسجيل المصروف' }
         return 'تم تسجيل مصروف بقيمة ' + payload.amount + ' جنيه (' + payload.category + ') بتاريخ ' + payload.expense_date + '.'
       } catch (err) {
         return 'حصل خطأ أثناء تسجيل المصروف: ' + err.message
@@ -1571,8 +1767,10 @@ export default function AIAssistant() {
           title: args.title || 'رسالة من لابو',
           message: args.message,
           target_user_id: null,
-        }])
+        }]).select('id')
         if (res.error) throw res.error
+        const newId = res.data && res.data[0] && res.data[0].id
+        if (meta && newId) meta.undo = { kind: 'delete_rows', table: 'admin_notifications', ids: [newId], label: 'تراجع عن إرسال الإشعار' }
         return 'تم إرسال الإشعار للأدمن: "' + args.message + '"'
       } catch (err) {
         return 'حصل خطأ أثناء إرسال الإشعار: ' + err.message
@@ -1602,15 +1800,17 @@ export default function AIAssistant() {
           if (!args.name) return 'محتاج اسم التحليل.'
           const dupRes = await supabase.from('test_catalog').select('id').ilike('name', args.name).maybeSingle()
           if (dupRes.data) return 'التحليل ده موجود بالفعل في الكتالوج.'
-          const res = await supabase.from('test_catalog').insert([{ name: args.name, normal_range: args.normal_range || null, unit: args.unit || null }])
+          const res = await supabase.from('test_catalog').insert([{ name: args.name, normal_range: args.normal_range || null, unit: args.unit || null }]).select('id')
           if (res.error) throw res.error
           invalidateTestCatalogCache()
+          const newId = res.data && res.data[0] && res.data[0].id
+          if (meta && newId) meta.undo = { kind: 'delete_rows', table: 'test_catalog', ids: [newId], label: 'تراجع عن إضافة التحليل' }
           return 'تم إضافة تحليل "' + args.name + '" للكتالوج.'
         }
 
         if (action === 'update') {
           if (!args.name) return 'محتاج اسم التحليل المطلوب تعديله.'
-          const found = await supabase.from('test_catalog').select('id').ilike('name', args.name).maybeSingle()
+          const found = await supabase.from('test_catalog').select('id, normal_range, unit').ilike('name', args.name).maybeSingle()
           if (!found.data) return 'مش لاقي تحليل اسمه "' + args.name + '" في الكتالوج.'
           const updates = {}
           if (args.normal_range) updates.normal_range = args.normal_range
@@ -1618,6 +1818,10 @@ export default function AIAssistant() {
           const res = await supabase.from('test_catalog').update(updates).eq('id', found.data.id)
           if (res.error) throw res.error
           invalidateTestCatalogCache()
+          if (meta) meta.undo = {
+            kind: 'restore_fields', table: 'test_catalog', id: found.data.id,
+            previousValues: { normal_range: found.data.normal_range, unit: found.data.unit }, label: 'تراجع عن تعديل التحليل'
+          }
           return 'تم تعديل بيانات تحليل "' + args.name + '".'
         }
 
@@ -1783,9 +1987,17 @@ export default function AIAssistant() {
     setMessages(function (prev) { return prev.map(function (m, i) { return i === index ? Object.assign({}, m, { pending: Object.assign({}, m.pending, { status: 'cancelled' }) }) : m }) })
   }
 
+  const isValidAge = (age) => Number.isFinite(age) && age > 0 && age <= 130
+
   const executeNewPatient = async (data) => {
+    const name = (data.name || '').trim()
+    if (!name) throw new Error('اسم المريض فاضي، مينفعش يتحفظ من غيره')
+    const age = parseInt(data.age, 10)
+    if (!isValidAge(age)) throw new Error('سن المريض غير صحيح ("' + data.age + '")، لازم يكون رقم بين 1 و130')
+    if (data.gender !== 'ذكر' && data.gender !== 'أنثى') throw new Error('نوع المريض لازم يكون "ذكر" أو "أنثى" بالظبط')
+
     const insertRes = await supabase.from('patients').insert([{
-      name: data.name, age: parseInt(data.age), gender: data.gender, phone: data.phone || null, doctor: data.doctor || null
+      name: name, age: age, gender: data.gender, phone: data.phone || null, doctor: data.doctor || null
     }]).select().single()
     if (insertRes.error) throw insertRes.error
     const patient = insertRes.data
@@ -1816,7 +2028,13 @@ export default function AIAssistant() {
   }
 
   const executeUpdatePatient = async (data) => {
-    const res = await supabase.from('patients').update(data.updates).eq('id', data.patientId)
+    const updates = data.updates || {}
+    if (Object.keys(updates).length === 0) throw new Error('مفيش أي تعديل فعلي متبعت')
+    if (updates.name !== undefined && !String(updates.name).trim()) throw new Error('الاسم الجديد مينفعش يكون فاضي')
+    if (updates.age !== undefined && !isValidAge(updates.age)) throw new Error('السن الجديد غير صحيح ("' + updates.age + '")، لازم يكون رقم بين 1 و130')
+    if (updates.gender !== undefined && updates.gender !== 'ذكر' && updates.gender !== 'أنثى') throw new Error('النوع الجديد لازم يكون "ذكر" أو "أنثى" بالظبط')
+
+    const res = await supabase.from('patients').update(updates).eq('id', data.patientId)
     if (res.error) throw res.error
   }
 
@@ -2087,7 +2305,7 @@ export default function AIAssistant() {
                   </div>
                 )}
                 {msg.role === 'assistant'
-                  ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                  ? <div onClick={handleAssistantBubbleClick} dangerouslySetInnerHTML={{ __html: wrapCopyableNumbers(renderMarkdown(msg.content)) }} />
                   : msg.content}
                 {msg.role === 'assistant' && msg.reportUrl && (
                   <button onClick={function () { window.open(msg.reportUrl, '_blank') }}
@@ -2102,6 +2320,18 @@ export default function AIAssistant() {
                     style={{ background: '#065f46', color: 'white', border: 'none', cursor: 'pointer' }}>
                     📄 حوّل القايمة دي لملف PDF
                   </button>
+                )}
+                {msg.role === 'assistant' && msg.undo && msg.undoExpiresAt && Date.now() < msg.undoExpiresAt && msg.undoStatus !== 'done' && (
+                  <button
+                    onClick={function () { if (Date.now() < msg.undoExpiresAt && msg.undoStatus !== 'loading') performUndo(i, msg.undo, msg.undoExpiresAt) }}
+                    disabled={msg.undoStatus === 'loading'}
+                    className="mt-2 text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                    style={{ background: '#fff', color: '#b45309', border: '1px solid #f59e0b', cursor: msg.undoStatus === 'loading' ? 'default' : 'pointer', opacity: msg.undoStatus === 'loading' ? 0.6 : 1 }}>
+                    {msg.undoStatus === 'loading' ? '⏳ جاري التراجع...' : msg.undoStatus === 'error' ? '⚠️ حاول التراجع تاني' : '↩️ ' + msg.undo.label}
+                  </button>
+                )}
+                {msg.role === 'assistant' && msg.undoStatus === 'done' && (
+                  <span className="mt-2 text-xs font-medium flex items-center gap-1.5" style={{ color: '#065f46' }}>✅ تم التراجع</span>
                 )}
               </div>
 
