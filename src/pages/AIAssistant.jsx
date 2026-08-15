@@ -484,6 +484,14 @@ const resolvePatient = (patients, name, age) => {
   return { ambiguous: candidates }
 }
 
+// بيفرّق بين حالتين مختلفتين تمامًا: الموديل نسي يبعت اسم المريض خالص (باج في استدعاء
+// الأداة نفسها)، أو الاسم اتبعت فعلاً بس مفيش مريض بيه في النظام. من غيره كانت الرسالة
+// بتطلع "مش لاقي مريض اسمه undefined" وده مربك للمستخدم
+const patientNotFoundMessage = (patientName) => {
+  if (!patientName || !String(patientName).trim()) return 'اسم المريض مطلوب لهذه العملية - حدده وحاول تاني.'
+  return 'مش لاقي مريض اسمه "' + patientName + '"'
+}
+
 const ambiguityMessage = (candidates) => {
   const list = candidates.map(function (p) {
     return '- ' + p.name + ' (' + formatAge(p.age, p.age_unit) + '، ' + p.gender + (p.doctor ? '، دكتور: ' + p.doctor : '') + ')'
@@ -610,12 +618,13 @@ const TOOLS = [
   {
     type: 'function',
     name: 'list_patients',
-    description: 'يرجع عدد المرضى المسجلين وقائمة بأسمائهم، مع إمكانية فلترة بفترة زمنية معينة. استخدمها لو المستخدم سأل عن عدد المرضى، طلب قائمة الأسماء، أو طلب تقرير/PDF عن مرضى فترة معينة (مثلاً "مرضى الأسبوع اللي فات").',
+    description: 'يرجع عدد المرضى المسجلين وقائمة بأسمائهم، مع إمكانية فلترة بفترة زمنية معينة. استخدمها لو المستخدم سأل عن عدد المرضى، طلب قائمة الأسماء، أو طلب تقرير/PDF عن مرضى فترة معينة (مثلاً "مرضى الأسبوع اللي فات"). لو المستخدم عايز تفاصيل نتايج التحاليل لعدة مرضى مع بعض (زي "هات نتايجهم" أو "تقرير فيه نتايج الحالات دي")، استخدم نفس الأداة دي مع include_tests: true بدل ما تنادي find_patient لكل مريض لوحده - أسرع وأدق بكتير.',
     parameters: {
       type: 'object',
       properties: {
         from_date: { type: 'string', description: 'تاريخ البداية بصيغة YYYY-MM-DD (اختياري)' },
-        to_date: { type: 'string', description: 'تاريخ النهاية بصيغة YYYY-MM-DD (اختياري، شامل هذا اليوم)' }
+        to_date: { type: 'string', description: 'تاريخ النهاية بصيغة YYYY-MM-DD (اختياري، شامل هذا اليوم)' },
+        include_tests: { type: 'boolean', description: 'لو true، بترجع تفاصيل التحاليل ونتائجها لكل مريض كمان (مش بس الاسم). استخدمها لو الطلب يحتاج نتايج فعلية مش بس قائمة أسماء.' }
       }
     }
   },
@@ -828,7 +837,7 @@ const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous ب�
   '- لو الطلب واضح ومش محتاج بيانات إضافية، رد مباشرة بدون أي استدعاء أدوات.\n' +
   '- لو محتاج بيانات (list_patients أو find_patient) عشان تبني منها تقرير PDF، اجمعها في أقل عدد ممكن من الاستدعاءات، ومتكررش استدعاء نفس الأداة لنفس البيانات في نفس الرد.\n\n' +
   'الأدوات المتاحة لك وإزاي تستخدمها:\n' +
-  '- list_patients: استخدمها بس لو المستخدم سأل عن عدد المرضى أو طلب قائمة الأسماء. متفترضش إنك عارف القائمة من نفسك.\n' +
+  '- list_patients: استخدمها بس لو المستخدم سأل عن عدد المرضى أو طلب قائمة الأسماء. متفترضش إنك عارف القائمة من نفسك. لو الطلب محتاج نتايج تحاليل لعدة مرضى مع بعض (زي "هات نتايجهم" أو "تقرير فيه نتايج الحالات دي" بعد ما عرضت قائمة)، نادِ list_patients تاني مع include_tests: true عشان تجيب كل النتائج في نداء واحد بس - ممنوع تنادي find_patient لكل مريض في القائمة لوحده، ده بطيء وعرضة للأخطاء.\n' +
   '- find_patient: استخدمها أول ما تحتاج أي تفصيل عن مريض معين (تحاليله، نتائجه، حالته). لا تخمّن بيانات مريض من نفسك أبدًا.\n\n' +
   'قواعد التأكيد قبل التنفيذ (مهم جدًا، أمان البيانات الطبية يعتمد عليها):\n' +
   '- propose_new_patient، propose_test_result، propose_update_patient، propose_delete_patient: الأربعة دول بيعرضوا البيانات في الشات للمستخدم يأكدها بنفسه، وما بيحفظوش أو يعدّلوا أو يمسحوا حاجة فعليًا. لو استخدمت واحدة منهم، قول للمستخدم إن البيانات معروضة وتنتظر تأكيده، ومتقولش أبدًا إن العملية "تمت".\n' +
@@ -1568,7 +1577,7 @@ export default function AIAssistant() {
 
     if (name === 'propose_test_result') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
+      if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       setMessages(function (prev) {
@@ -1582,7 +1591,7 @@ export default function AIAssistant() {
 
     if (name === 'propose_update_patient') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
+      if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       const updates = {}
@@ -1603,7 +1612,7 @@ export default function AIAssistant() {
 
     if (name === 'propose_delete_patient') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
+      if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       setMessages(function (prev) {
@@ -1618,7 +1627,7 @@ export default function AIAssistant() {
     if (name === 'add_tests_to_patient') {
       try {
         const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-        if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
+        if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
         if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
         showStatus('⏳ بيضيف تحاليل للمريض ' + resolved.match.name + '...')
@@ -1865,28 +1874,67 @@ export default function AIAssistant() {
 
       if (!filtered.length) return 'مفيش مرضى مطابقين للفترة دي.'
 
-      const MAX_LISTED = 50
-      const shown = filtered.slice(0, MAX_LISTED)
-      const roster = shown.map(function (p) { return p.name + ' (' + formatAge(p.age, p.age_unit) + '، ' + p.gender + ')' }).join('، ')
-      const extra = filtered.length > MAX_LISTED ? ' (وعرضنا أول ' + MAX_LISTED + ' بس، العدد الكلي أكبر من كده)' : ''
+      if (!args.include_tests) {
+        const MAX_LISTED = 50
+        const shown = filtered.slice(0, MAX_LISTED)
+        const roster = shown.map(function (p) { return p.name + ' (' + formatAge(p.age, p.age_unit) + '، ' + p.gender + ')' }).join('، ')
+        const extra = filtered.length > MAX_LISTED ? ' (وعرضنا أول ' + MAX_LISTED + ' بس، العدد الكلي أكبر من كده)' : ''
+
+        if (meta) meta.pdfData = {
+          title: 'قائمة المرضى',
+          sections: [{
+            heading: 'المرضى (' + filtered.length + ')', type: 'table',
+            columns: ['الاسم', 'السن', 'النوع', 'الدكتور', 'تاريخ التسجيل'],
+            rows: filtered.slice(0, 300).map(function (p) {
+              return [p.name, formatAge(p.age, p.age_unit), p.gender || '-', p.doctor || '-', p.created_at ? new Date(p.created_at).toLocaleDateString('ar-EG') : '-'].join('|')
+            })
+          }]
+        }
+
+        return 'عدد المرضى المطابقين: ' + filtered.length + extra + '. الأسماء: ' + roster
+      }
+
+      // include_tests: بنجيب نتائج التحاليل لكل المرضى دول في استعلام واحد بس - بدل ما الموديل
+      // يضطر ينادي find_patient لكل مريض لوحده (بطيء، بياكل حصة الـ RPM، وعرضة لغلطات
+      // زي تمرير اسم فاضي). ده اللي بيحل مشكلة "التقرير المجمّع" من جذرها.
+      const MAX_WITH_TESTS = 20
+      const shown = filtered.slice(0, MAX_WITH_TESTS)
+      const extra = filtered.length > shown.length ? ' (وعرضنا أول ' + shown.length + ' بس، العدد الكلي أكبر من كده - اطلب فترة أضيق لو محتاج البقية)' : ''
+
+      const ids = shown.map(function (p) { return p.id })
+      const fullRes = await supabase.from('patients').select('*, tests(*)').in('id', ids)
+      if (fullRes.error) return 'حصل خطأ أثناء جلب نتائج التحاليل: ' + fullRes.error.message
+
+      const byId = {}
+      ;(fullRes.data || []).forEach(function (p) { byId[p.id] = p })
+      const orderedFull = shown.map(function (p) { return byId[p.id] }).filter(Boolean)
+
+      const buildTestsList = function (p, sep) {
+        return (p.tests || []).map(function (t) { return t.name + ': ' + (t.value || 'لسه معملتش') + (t.unit ? ' ' + t.unit : '') }).join(sep)
+      }
+
+      const testsSummaryText = orderedFull.map(function (p) {
+        const testsList = buildTestsList(p, '، ')
+        return p.name + ' (' + formatAge(p.age, p.age_unit) + '، ' + p.gender + ')' + (testsList ? ' - التحاليل: ' + testsList : ' - مفيش تحاليل مسجلة')
+      }).join('\n')
 
       if (meta) meta.pdfData = {
-        title: 'قائمة المرضى',
+        title: 'نتائج التحاليل - قائمة مرضى',
         sections: [{
-          heading: 'المرضى (' + filtered.length + ')', type: 'table',
-          columns: ['الاسم', 'السن', 'النوع', 'الدكتور', 'تاريخ التسجيل'],
-          rows: filtered.slice(0, 300).map(function (p) {
-            return [p.name, formatAge(p.age, p.age_unit), p.gender || '-', p.doctor || '-', p.created_at ? new Date(p.created_at).toLocaleDateString('ar-EG') : '-'].join('|')
+          heading: 'المرضى ونتائجهم', type: 'table',
+          columns: ['الاسم', 'السن', 'النوع', 'الدكتور', 'التحاليل والنتائج'],
+          rows: orderedFull.map(function (p) {
+            return [p.name, formatAge(p.age, p.age_unit), p.gender || '-', p.doctor || '-', buildTestsList(p, '؛ ') || 'مفيش تحاليل'].join('|')
           })
         }]
       }
 
-      return 'عدد المرضى المطابقين: ' + filtered.length + extra + '. الأسماء: ' + roster
+      return 'عدد المرضى: ' + orderedFull.length + extra + '. تفاصيل النتائج:\n' + testsSummaryText
     }
 
     if (name === 'find_patient') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
+      if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       showStatus('⏳ بيجيب بيانات ' + resolved.match.name + '...')
@@ -1917,7 +1965,7 @@ export default function AIAssistant() {
 
     if (name === 'open_patient_report') {
       const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
-      if (resolved.notFound) return 'مش لاقي مريض اسمه "' + args.patient_name + '"'
+      if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
       navigate('/reports', { state: { autoSelectPatientId: resolved.match.id } })
