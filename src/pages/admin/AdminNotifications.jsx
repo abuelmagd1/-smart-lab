@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../supabase'
+import { useToast } from '../../components/Toast'
 
 export default function AdminNotifications() {
+  const showToast = useToast()
   const [labs, setLabs] = useState([])
   const [sentNotifications, setSentNotifications] = useState([])
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [success, setSuccess] = useState(false)
   const [form, setForm] = useState({ title: '', message: '', target: 'all' })
+  const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   const fetchData = async () => {
     // مسح الإشعارات اللي عدى عليها أسبوع كامل
@@ -32,7 +36,7 @@ export default function AdminNotifications() {
   useEffect(() => { fetchData() }, [])
 
   const sendNotification = async () => {
-    if (!form.title || !form.message) return alert('من فضلك ادخل العنوان والرسالة')
+    if (!form.title || !form.message) { showToast('من فضلك ادخل العنوان والرسالة', 'warning'); return }
     setSending(true)
 
     await supabase.from('admin_notifications').insert([{
@@ -48,9 +52,21 @@ export default function AdminNotifications() {
     setTimeout(() => setSuccess(false), 3000)
   }
 
-  const deleteNotification = async (id) => {
-    if (!window.confirm('هتحذف الإشعار ده؟')) return
-    await supabase.from('admin_notifications').delete().eq('id', id)
+  const deleteNotification = (n) => {
+    setDeleteConfirm(n)
+  }
+
+  const confirmDeleteNotification = async () => {
+    if (!deleteConfirm) return
+    setDeleting(true)
+    const { error } = await supabase.from('admin_notifications').delete().eq('id', deleteConfirm.id)
+    setDeleting(false)
+    if (error) {
+      showToast('حصل خطأ أثناء الحذف: ' + error.message, 'error')
+      return
+    }
+    setDeleteConfirm(null)
+    showToast('تم حذف الإشعار ✅', 'success')
     fetchData()
   }
 
@@ -132,13 +148,34 @@ export default function AdminNotifications() {
                   📍 {getTargetLabel(n.target_user_id)} • {new Date(n.created_at).toLocaleString('ar-EG')}
                 </p>
               </div>
-              <button onClick={() => deleteNotification(n.id)}
+              <button onClick={() => deleteNotification(n)}
                 className="px-3 py-1 rounded-lg text-xs font-medium flex-shrink-0"
                 style={{ background: '#fee2e2', color: '#dc2626' }}>
                 🗑️ حذف
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {deleteConfirm && (
+        <div className="fixed inset-0 flex items-center justify-center p-4 z-50" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <div className="bg-white rounded-xl p-5 w-full max-w-sm">
+            <h3 className="font-bold text-base mb-2" style={{ color: 'var(--on-surface)' }}>تأكيد حذف الإشعار</h3>
+            <p className="text-sm mb-4" style={{ color: 'var(--on-surface-variant)' }}>
+              هيتم حذف الإشعار <strong>"{deleteConfirm.title}"</strong> نهائيًا.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteConfirm(null)} disabled={deleting}
+                className="flex-1 py-2 rounded-lg text-sm font-medium" style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+                إلغاء
+              </button>
+              <button onClick={confirmDeleteNotification} disabled={deleting}
+                className="flex-1 py-2 rounded-lg text-sm font-medium text-white" style={{ background: '#dc2626', opacity: deleting ? 0.7 : 1 }}>
+                {deleting ? 'جاري الحذف...' : 'حذف'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1021,8 +1021,14 @@ export default function AIAssistant() {
     el.style.height = Math.min(el.scrollHeight, 120) + 'px'
   }
 
+  const MAX_INPUT_CHARS = 4000
   const handleInputChange = (e) => {
-    setInput(e.target.value)
+    var value = e.target.value
+    if (value.length > MAX_INPUT_CHARS) {
+      value = value.slice(0, MAX_INPUT_CHARS)
+      showToast('الرسالة طويلة جدًا - تم اقتصاصها على ' + MAX_INPUT_CHARS + ' حرف', 'warning')
+    }
+    setInput(value)
     adjustTextareaHeight()
   }
 
@@ -1105,7 +1111,7 @@ export default function AIAssistant() {
     setMessages([{ role: 'assistant', content: 'أهلاً! أنا لابو 👋 قولي إيه اللي تعمله وأنا هعمله فوراً!' }])
   }
 
-  const sendMessage = async (text) => {
+  const sendMessage = async (text, skipNav) => {
     const trimmed = (text || '').trim()
     const imagesToSend = pendingImages
     if (!trimmed && imagesToSend.length === 0) return
@@ -1115,8 +1121,10 @@ export default function AIAssistant() {
     stopSpeaking()
     const userMessageText = trimmed || 'صف الصورة دي وقولّي رأيك فيها'
 
-    // أمر تنقّل فوري - بيتنفذ لحظيًا من غير ما نلمس الشبكة خالص، حتى لو النت مقطوع
-    const navMatch = imagesToSend.length === 0 ? findQuickNavCommand(userMessageText) : null
+    // أمر تنقّل فوري - بيتنفذ لحظيًا من غير ما نلمس الشبكة خالص، حتى لو النت مقطوع.
+    // الاقتراحات الجاهزة (SUGGESTIONS) مستثناة عمدًا (skipNav) عشان تفضل بتوضح
+    // إمكانيات لابو الحقيقية (زي تسجيل مريض بالمحادثة) بدل ما تتحول لتنقّل بسيط
+    const navMatch = (!skipNav && imagesToSend.length === 0) ? findQuickNavCommand(userMessageText) : null
     if (navMatch) {
       setMessages(function (prev) {
         return prev.concat(
@@ -2149,7 +2157,7 @@ export default function AIAssistant() {
         }
       }, MAX_RECORDING_MS)
     } catch {
-      alert('محتاجين إذن الميكروفون')
+      showToast('محتاجين إذن الميكروفون عشان تقدر تسجّل صوت', 'warning')
     }
   }
 
@@ -2332,7 +2340,7 @@ export default function AIAssistant() {
           <div className="flex flex-wrap gap-2 justify-center mt-6">
             {SUGGESTIONS.map(function (s, idx) {
               return (
-                <button key={idx} onClick={function () { sendMessage(s) }}
+                <button key={idx} onClick={function () { sendMessage(s, true) }}
                   className="text-xs px-3 py-2 rounded-full transition-all"
                   style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
                   {s}
@@ -2484,7 +2492,7 @@ export default function AIAssistant() {
           <span className="text-xs font-medium self-center" style={{ color: '#dc2626' }}>{formatTimer(recordingSeconds)}</span>
         )}
 
-        <textarea ref={textareaRef} id="labo-chat-input" name="labo-chat-input" value={input} rows={1}
+        <textarea ref={textareaRef} id="labo-chat-input" name="labo-chat-input" value={input} rows={1} maxLength={MAX_INPUT_CHARS}
           onChange={handleInputChange}
           onKeyDown={handleInputKeyDown}
           placeholder="اكتب سؤالك أو أمرك هنا... (Shift+Enter لسطر جديد)"

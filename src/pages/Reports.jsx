@@ -148,6 +148,33 @@ const splitTests = (patient) => {
   return { singleTests, panelGroups }
 }
 
+const DesignToggle = ({ label, dkey, design, setDesign }) => {
+  const on = design[dkey] !== false
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <label className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>{label}</label>
+      <button type="button" onClick={() => setDesign(prev => ({ ...prev, [dkey]: !on }))}
+        aria-pressed={on}
+        style={{
+          width: '34px', height: '18px', borderRadius: '9px', position: 'relative',
+          background: on ? 'var(--primary-container)' : '#d1d5db', border: 'none', cursor: 'pointer', flexShrink: 0,
+        }}>
+        <span style={{
+          position: 'absolute', top: '2px', [on ? 'right' : 'left']: '2px',
+          width: '14px', height: '14px', borderRadius: '50%', background: 'white',
+        }} />
+      </button>
+    </div>
+  )
+}
+
+const DesignSection = ({ title, children }) => (
+  <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--outline-variant)' }}>
+    <h4 className="text-xs font-bold mb-2" style={{ color: 'var(--on-surface)' }}>{title}</h4>
+    <div className="space-y-2">{children}</div>
+  </div>
+)
+
 export default function Reports() {
   const location = useLocation()
   const showToast = useToast()
@@ -1064,33 +1091,6 @@ export default function Reports() {
     )
   }
 
-  const DesignToggle = ({ label, dkey }) => {
-    const on = design[dkey] !== false
-    return (
-      <div className="flex items-center justify-between gap-2">
-        <label className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>{label}</label>
-        <button type="button" onClick={() => setDesign(prev => ({ ...prev, [dkey]: !on }))}
-          aria-pressed={on}
-          style={{
-            width: '34px', height: '18px', borderRadius: '9px', position: 'relative',
-            background: on ? 'var(--primary-container)' : '#d1d5db', border: 'none', cursor: 'pointer', flexShrink: 0,
-          }}>
-          <span style={{
-            position: 'absolute', top: '2px', [on ? 'right' : 'left']: '2px',
-            width: '14px', height: '14px', borderRadius: '50%', background: 'white',
-          }} />
-        </button>
-      </div>
-    )
-  }
-
-  const DesignSection = ({ title, children }) => (
-    <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--outline-variant)' }}>
-      <h4 className="text-xs font-bold mb-2" style={{ color: 'var(--on-surface)' }}>{title}</h4>
-      <div className="space-y-2">{children}</div>
-    </div>
-  )
-
   return (
     <div className="p-6" dir="rtl">
 
@@ -1216,7 +1216,7 @@ export default function Reports() {
             </div>
 
             <div className="space-y-2">
-              <DesignToggle label="إظهار شريط العنوان" dkey="report_show_header_banner" />
+              <DesignToggle label="إظهار شريط العنوان" dkey="report_show_header_banner" design={design} setDesign={setDesign} />
               <div>
                 <label className="text-xs block mb-1" style={{ color: 'var(--on-surface-variant)' }}>نص العنوان</label>
                 <input type="text" value={design.report_header_title}
@@ -1239,7 +1239,7 @@ export default function Reports() {
             </div>
 
             <DesignSection title="🏷️ الباركود">
-              <DesignToggle label="إظهار الباركود" dkey="report_show_barcode" />
+              <DesignToggle label="إظهار الباركود" dkey="report_show_barcode" design={design} setDesign={setDesign} />
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>لون الباركود والـ ID</label>
                 <input type="color" value={design.report_barcode_color}
@@ -1261,9 +1261,9 @@ export default function Reports() {
                   />
                 </div>
               ))}
-              <DesignToggle label="إظهار عمود الوحدة" dkey="report_show_unit_column" />
-              <DesignToggle label="إظهار عمود المعدل الطبيعي" dkey="report_show_range_column" />
-              <DesignToggle label="تلوين الصفوف بالتبادل" dkey="report_zebra_stripes" />
+              <DesignToggle label="إظهار عمود الوحدة" dkey="report_show_unit_column" design={design} setDesign={setDesign} />
+              <DesignToggle label="إظهار عمود المعدل الطبيعي" dkey="report_show_range_column" design={design} setDesign={setDesign} />
+              <DesignToggle label="تلوين الصفوف بالتبادل" dkey="report_zebra_stripes" design={design} setDesign={setDesign} />
             </DesignSection>
 
             <DesignSection title="🎯 ألوان النتائج">
@@ -1280,7 +1280,7 @@ export default function Reports() {
                   />
                 </div>
               ))}
-              <DesignToggle label="تخانة (Bold) النتائج غير الطبيعية" dkey="report_bold_abnormal" />
+              <DesignToggle label="تخانة (Bold) النتائج غير الطبيعية" dkey="report_bold_abnormal" design={design} setDesign={setDesign} />
             </DesignSection>
 
             <DesignSection title="🔤 الخط">
@@ -1308,8 +1308,8 @@ export default function Reports() {
             </DesignSection>
 
             <DesignSection title="✍️ التذييل">
-              <DesignToggle label="إظهار مكان ختم المعمل" dkey="report_show_stamp_box" />
-              <DesignToggle label="إظهار خط توقيع الدكتور" dkey="report_show_signature_line" />
+              <DesignToggle label="إظهار مكان ختم المعمل" dkey="report_show_stamp_box" design={design} setDesign={setDesign} />
+              <DesignToggle label="إظهار خط توقيع الدكتور" dkey="report_show_signature_line" design={design} setDesign={setDesign} />
               <div>
                 <label className="text-xs block mb-1" style={{ color: 'var(--on-surface-variant)' }}>ملاحظة أسفل التقرير (اختياري)</label>
                 <textarea rows={2} value={design.report_footer_note}
@@ -1321,8 +1321,8 @@ export default function Reports() {
             </DesignSection>
 
             <DesignSection title="🧾 الباقات والتاريخ">
-              <DesignToggle label="إظهار سجل الزيارات السابقة" dkey="report_show_history" />
-              <DesignToggle label="إظهار الرسم البياني للاتجاه" dkey="report_show_trend_charts" />
+              <DesignToggle label="إظهار سجل الزيارات السابقة" dkey="report_show_history" design={design} setDesign={setDesign} />
+              <DesignToggle label="إظهار الرسم البياني للاتجاه" dkey="report_show_trend_charts" design={design} setDesign={setDesign} />
             </DesignSection>
 
             <button onClick={saveDesign} disabled={savingDesign}

@@ -40,8 +40,29 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 /* =====================================================================
-   ??????? ?????? ????
+   إعدادات الموبايل والتاتش
    ===================================================================== */
+
+/* رد فعل بصري فوري لما تدوس على أي زرار - بيشتغل بالتاتش كمان (مش :hover اللي مبيشتغلش على الموبايل خالص) */
+button:not(:disabled):active,
+a[role="button"]:not(:disabled):active,
+.btn:not(:disabled):active {
+  transform: scale(0.97);
+  transition: transform 100ms ease-out;
+}
+
+/* لو المستخدم مفعّل "تقليل الحركة" في نظام التشغيل بتاعه (غالبًا لأسباب صحية)، نلغي كل الحركة
+   المش ضرورية ونستبدلها بتغيير فوري - عدا تغيير اللون/الشفافية اللي بيساعد على الفهم */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+  body {
+    transition: none;
+  }
+}
 
 @media (max-width: 768px) {
   input, select, textarea {
