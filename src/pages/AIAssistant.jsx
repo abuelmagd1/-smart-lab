@@ -176,7 +176,20 @@ const sectionsHaveContent = (sectionsInput) => {
 
 const renderMarkdown = (text) => {
   if (!text) return ''
-  return text
+  // حماية من XSS: النص ده جاي من رد الذكاء الاصطناعي (Gemini)، واللي بيتحقن جوه
+  // dangerouslySetInnerHTML. لو المستخدم أو أي بيانات مريض فيها نص زي
+  // "<img src=x onerror=...>" وحصل عليه الـ AI ورجّعه في رده (حتى لو من غير قصد،
+  // زي مجرد تكرار اسم مريض فيه محاولة حقن)، كان بينفّذ فعليًا في متصفح الموظف
+  // اللي داخل بجلسته. دلوقتي بنعمل escape للـ HTML الخام الأول، وبعدين نطبّق
+  // تحويلات الـ markdown البسيطة (bold, headings, ...) فوق النص الآمن ده بس.
+  const escapeHtml = (s) => s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+  return escapeHtml(text)
     .replace(/### (.+)/g, '<h3 style="font-size:14px;font-weight:bold;margin:8px 0 4px;color:var(--on-surface)">$1</h3>')
     .replace(/## (.+)/g, '<h2 style="font-size:15px;font-weight:bold;margin:10px 0 4px;color:var(--on-surface)">$1</h2>')
     .replace(/# (.+)/g, '<h1 style="font-size:16px;font-weight:bold;margin:10px 0 4px;color:var(--on-surface)">$1</h1>')
@@ -470,12 +483,26 @@ const convertRecordingToWav = async (audioBlob) => {
   }
 }
 
-const resolvePatient = (patients, name, age) => {
+// كانت بتاخد قائمة كل المرضى (محمّلة مقدمًا بالكامل قبل كل رسالة) وتدوّر فيها
+// محليًا. دلوقتي بتدوّر مباشرة في قاعدة البيانات وقت ما فعليًا محتاجة اسم
+// معين بس - مش محتاجين نجيب كل المرضى عشان نلاقي واحد بس، وده هيفضل خفيف
+// حتى لو عدد المرضى وصل آلاف
+const resolvePatient = async (name, age) => {
   const target = (name || '').trim()
   if (!target) return { notFound: true }
-  let candidates = patients.filter(function (p) { return p.name && p.name.trim() === target })
-  if (candidates.length === 0) candidates = patients.filter(function (p) { return p.name && p.name.includes(target) })
-  if (candidates.length === 0) return { notFound: true }
+
+  const { data, error } = await supabase
+    .from('patients')
+    .select('id, name, age, age_unit, gender, phone, doctor, created_at')
+    .ilike('name', '%' + target.replace(/[%_]/g, '\\$&') + '%')
+    .limit(30)
+
+  if (error) return { notFound: true }
+  const found = data || []
+  if (found.length === 0) return { notFound: true }
+
+  let candidates = found.filter(function (p) { return p.name && p.name.trim() === target })
+  if (candidates.length === 0) candidates = found
   if (candidates.length > 1 && age) {
     const narrowed = candidates.filter(function (p) { return String(p.age) === String(age) })
     if (narrowed.length === 1) return { match: narrowed[0] }
@@ -946,11 +973,6 @@ export default function AIAssistant() {
     historyRef.current = { previousId: null }
   }
 
-  const getPatientsLight = async () => {
-    const res = await supabase.from('patients').select('id, name, age, age_unit, gender, phone, doctor, created_at')
-    return res.data || []
-  }
-
   const getPatientWithTests = async (patientId) => {
     const res = await supabase.from('patients').select('*, tests(*)').eq('id', patientId).single()
     return res.data || null
@@ -1185,10 +1207,9 @@ export default function AIAssistant() {
     abortControllerRef.current = controller
 
     try {
-      // بنبدأ سحب بيانات المرضى ونداء Gemini في نفس الوقت بدل ما ننتظر الداتابيز
-      // الأول - البيانات مش هتتستخدم فعليًا إلا لو الموديل قرر ينادي أداة محتاجاها،
-      // وده بيوفر رحلة كاملة للداتابيز على كل رسالة عادية (زي "إزيك" أو سؤال عام)
-      const patientsPromise = getPatientsLight()
+      // بنبدأ نداء Gemini على طول من غير ما ننتظر أي حاجة من قاعدة البيانات
+      // مقدمًا - بيانات المرضى بقت بتتجاب بس وقت ما فعليًا محتاجينها (اسم
+      // معين، أو فترة تاريخ معينة) جوه الأداة نفسها لما الموديل يستخدمها
       let effectiveText = userMessageText
       if (contextDigestRef.current) {
         effectiveText = '(ملخص مختصر للسياق اللي فات قبل ما يتفتح سياق جديد:\n' + contextDigestRef.current + ')\n\nسؤال/طلب المستخدم الحالي: ' + userMessageText
@@ -1199,7 +1220,7 @@ export default function AIAssistant() {
         contentBlocks.push({ type: 'image', mime_type: img.mimeType, data: img.base64 })
       })
       const streamState = { id: null, text: '', startTime: performance.now(), firstTokenAt: null, flushTimer: null, pdfData: null }
-      await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], patientsPromise, 0, streamState)
+      await runAssistantTurn(controller.signal, [{ type: 'user_input', content: contentBlocks }], 0, streamState)
     } catch (err) {
       if (err.name === 'AbortError') {
         setMessages(function (prev) { return prev.concat([{ role: 'status', content: '⏹ تم إيقاف الطلب', time: Date.now() }]) })
@@ -1251,7 +1272,7 @@ export default function AIAssistant() {
     if (serviceDegraded) setServiceDegraded(false)
   }
 
-  const runAssistantTurn = async (signal, inputPayload, patientsPromise, depth, streamState, modelIndex) => {
+  const runAssistantTurn = async (signal, inputPayload, depth, streamState, modelIndex) => {
     if (depth > 6) {
       setMessages(function (prev) { return prev.concat([{ role: 'assistant', content: 'الطلب ده معقد شوية وطوّل في التنفيذ. جرّب تقسمه لخطوات أبسط، أو أعد صياغته وأنا هحاول تاني.', time: Date.now() }]) })
       return
@@ -1293,7 +1314,7 @@ export default function AIAssistant() {
       if (isOverloaded || isQuotaExceeded) markModelCooldown(modelToUse)
       if ((isOverloaded || isQuotaExceeded) && modelIndex < MODEL_CHAIN.length - 1) {
         showStatus('🔄 موديل "' + modelToUse + '" ' + (isQuotaExceeded ? 'خلصت حصته المجانية دلوقتي' : 'مشغول دلوقتي') + '، بيجرب موديل بديل...')
-        return runAssistantTurn(signal, inputPayload, patientsPromise, depth, streamState, modelIndex + 1)
+        return runAssistantTurn(signal, inputPayload, depth, streamState, modelIndex + 1)
       }
 
       throw new Error('خطأ من Gemini API: ' + apiErrorMsg)
@@ -1372,7 +1393,7 @@ export default function AIAssistant() {
 
       if ((isOverloaded || isQuotaExceeded) && modelIndex < MODEL_CHAIN.length - 1 && !streamState.text) {
         showStatus('🔄 موديل "' + modelToUse + '" ' + (isQuotaExceeded ? 'خلصت حصته المجانية دلوقتي' : 'مشغول دلوقتي') + '، بيجرب موديل بديل...')
-        return runAssistantTurn(signal, inputPayload, patientsPromise, depth, streamState, modelIndex + 1)
+        return runAssistantTurn(signal, inputPayload, depth, streamState, modelIndex + 1)
       }
 
       throw streamErr
@@ -1389,8 +1410,6 @@ export default function AIAssistant() {
     if (finalInteractionId) historyRef.current.previousId = finalInteractionId
 
     if (finalStatus === 'requires_action' && functionCallOrder.length > 0) {
-      const resolvedPatients = await patientsPromise
-
       // بننفذ كل الأدوات المطلوبة في نفس الرد بالتوازي بدل واحدة ورا التانية - ده بيفرق
       // بشكل ملحوظ لما الموديل يطلب أكتر من أداة قراءة مستقلة مع بعض (زي تقرير مركّب).
       // بنحافظ على ترتيب النتايج زي ما اتطلبت بالظبط عشان نتايج الـ Promise.all تترتب صح
@@ -1402,7 +1421,7 @@ export default function AIAssistant() {
         const meta = { reportUrl: null, forceFollowup: false, pdfData: null, undo: null }
         let resultText
         try {
-          resultText = await handleToolCall({ name: fc.name, id: fc.id, arguments: args }, signal, resolvedPatients, meta)
+          resultText = await handleToolCall({ name: fc.name, id: fc.id, arguments: args }, signal, meta)
         } catch (err) {
           if (err.name === 'AbortError') throw err
           resultText = 'حصل خطأ غير متوقع في تنفيذ هذه العملية: ' + err.message
@@ -1479,7 +1498,7 @@ export default function AIAssistant() {
         return
       }
 
-      await runAssistantTurn(signal, functionResults, patientsPromise, depth + 1, streamState, modelIndex)
+      await runAssistantTurn(signal, functionResults, depth + 1, streamState, modelIndex)
       return
     }
 
@@ -1569,7 +1588,7 @@ export default function AIAssistant() {
     }
   }
 
-  const handleToolCall = async (call, signal, patients, meta) => {
+  const handleToolCall = async (call, signal, meta) => {
     const args = call.arguments || {}
     const name = call.name
 
@@ -1584,7 +1603,7 @@ export default function AIAssistant() {
     }
 
     if (name === 'propose_test_result') {
-      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      const resolved = await resolvePatient(args.patient_name, args.patient_age)
       if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
@@ -1598,7 +1617,7 @@ export default function AIAssistant() {
     }
 
     if (name === 'propose_update_patient') {
-      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      const resolved = await resolvePatient(args.patient_name, args.patient_age)
       if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
@@ -1619,7 +1638,7 @@ export default function AIAssistant() {
     }
 
     if (name === 'propose_delete_patient') {
-      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      const resolved = await resolvePatient(args.patient_name, args.patient_age)
       if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
@@ -1634,7 +1653,7 @@ export default function AIAssistant() {
 
     if (name === 'add_tests_to_patient') {
       try {
-        const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+        const resolved = await resolvePatient(args.patient_name, args.patient_age)
         if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
         if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
@@ -1774,10 +1793,16 @@ export default function AIAssistant() {
     if (name === 'doctor_stats') {
       try {
         const targetDoctor = (args.doctor_name || '').trim()
+        // عمود واحد بس (doctor) مش كل بيانات المريض، ولو فيه اسم دكتور محدد
+        // بنفلتر في قاعدة البيانات مباشرة بدل ما نجيب الكل ونفلتر محليًا
+        let doctorQuery = supabase.from('patients').select('doctor')
+        if (targetDoctor) doctorQuery = doctorQuery.ilike('doctor', '%' + targetDoctor.replace(/[%_]/g, '\\$&') + '%')
+        const { data: doctorRows, error: doctorError } = await doctorQuery
+        if (doctorError) return 'حصل خطأ أثناء جلب إحصائيات الأطباء: ' + doctorError.message
+
         const grouped = {}
-        patients.forEach(function (p) {
+        ;(doctorRows || []).forEach(function (p) {
           const d = (p.doctor || 'بدون دكتور محدد').trim()
-          if (targetDoctor && !d.toLowerCase().includes(targetDoctor.toLowerCase())) return
           grouped[d] = (grouped[d] || 0) + 1
         })
         const entries = Object.entries(grouped)
@@ -1870,15 +1895,25 @@ export default function AIAssistant() {
     }
 
     if (name === 'list_patients') {
-      let filtered = patients
-      if (args.from_date) {
-        const fromTs = new Date(args.from_date + 'T00:00:00').getTime()
-        filtered = filtered.filter(function (p) { return p.created_at && new Date(p.created_at).getTime() >= fromTs })
-      }
-      if (args.to_date) {
-        const toTs = new Date(args.to_date + 'T23:59:59').getTime()
-        filtered = filtered.filter(function (p) { return p.created_at && new Date(p.created_at).getTime() <= toTs })
-      }
+      // بدل ما نفلتر قائمة كل المرضى المحمّلة مقدمًا، بندوّر في قاعدة
+      // البيانات مباشرة بنفس شروط التاريخ - وبنستخدم count الحقيقي من
+      // Supabase عشان العدد المعروض يفضل صحيح حتى لو حددنا limit على
+      // الصفوف الفعلية اللي بنجيبها
+      const MAX_ROWS = 300 // كفاية لأكبر عرض ممكن (جدول الـ PDF أقصى حاجة بيعرضها)
+      let listQuery = supabase
+        .from('patients')
+        .select('id, name, age, age_unit, gender, phone, doctor, created_at', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .limit(MAX_ROWS)
+
+      if (args.from_date) listQuery = listQuery.gte('created_at', args.from_date + 'T00:00:00')
+      if (args.to_date) listQuery = listQuery.lte('created_at', args.to_date + 'T23:59:59')
+
+      const { data: listData, count: totalCount, error: listError } = await listQuery
+      if (listError) return 'حصل خطأ أثناء جلب قائمة المرضى: ' + listError.message
+
+      const filtered = listData || []
+      const realTotal = totalCount != null ? totalCount : filtered.length
 
       if (!filtered.length) return 'مفيش مرضى مطابقين للفترة دي.'
 
@@ -1886,20 +1921,20 @@ export default function AIAssistant() {
         const MAX_LISTED = 50
         const shown = filtered.slice(0, MAX_LISTED)
         const roster = shown.map(function (p) { return p.name + ' (' + formatAge(p.age, p.age_unit) + '، ' + p.gender + ')' }).join('، ')
-        const extra = filtered.length > MAX_LISTED ? ' (وعرضنا أول ' + MAX_LISTED + ' بس، العدد الكلي أكبر من كده)' : ''
+        const extra = realTotal > MAX_LISTED ? ' (وعرضنا أول ' + MAX_LISTED + ' بس، العدد الكلي أكبر من كده)' : ''
 
         if (meta) meta.pdfData = {
           title: 'قائمة المرضى',
           sections: [{
-            heading: 'المرضى (' + filtered.length + ')', type: 'table',
+            heading: 'المرضى (' + realTotal + ')', type: 'table',
             columns: ['الاسم', 'السن', 'النوع', 'الدكتور', 'تاريخ التسجيل'],
-            rows: filtered.slice(0, 300).map(function (p) {
+            rows: filtered.map(function (p) {
               return [p.name, formatAge(p.age, p.age_unit), p.gender || '-', p.doctor || '-', p.created_at ? new Date(p.created_at).toLocaleDateString('ar-EG') : '-'].join('|')
             })
           }]
         }
 
-        return 'عدد المرضى المطابقين: ' + filtered.length + extra + '. الأسماء: ' + roster
+        return 'عدد المرضى المطابقين: ' + realTotal + extra + '. الأسماء: ' + roster
       }
 
       // include_tests: بنجيب نتائج التحاليل لكل المرضى دول في استعلام واحد بس - بدل ما الموديل
@@ -1907,7 +1942,7 @@ export default function AIAssistant() {
       // زي تمرير اسم فاضي). ده اللي بيحل مشكلة "التقرير المجمّع" من جذرها.
       const MAX_WITH_TESTS = 20
       const shown = filtered.slice(0, MAX_WITH_TESTS)
-      const extra = filtered.length > shown.length ? ' (وعرضنا أول ' + shown.length + ' بس، العدد الكلي أكبر من كده - اطلب فترة أضيق لو محتاج البقية)' : ''
+      const extra = realTotal > shown.length ? ' (وعرضنا أول ' + shown.length + ' بس، العدد الكلي أكبر من كده - اطلب فترة أضيق لو محتاج البقية)' : ''
 
       const ids = shown.map(function (p) { return p.id })
       const fullRes = await supabase.from('patients').select('*, tests(*)').in('id', ids)
@@ -1941,7 +1976,7 @@ export default function AIAssistant() {
     }
 
     if (name === 'find_patient') {
-      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      const resolved = await resolvePatient(args.patient_name, args.patient_age)
       if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 
@@ -1972,7 +2007,7 @@ export default function AIAssistant() {
     }
 
     if (name === 'open_patient_report') {
-      const resolved = resolvePatient(patients, args.patient_name, args.patient_age)
+      const resolved = await resolvePatient(args.patient_name, args.patient_age)
       if (resolved.notFound) return patientNotFoundMessage(args.patient_name)
       if (resolved.ambiguous) return ambiguityMessage(resolved.ambiguous)
 

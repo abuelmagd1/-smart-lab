@@ -4,10 +4,18 @@ import { supabase } from '../../supabase'
 // أحرف وأرقام بس، من غير حروف بتتلخبط زي O/0 أو I/1/L
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
 
+// كود التفعيل ده فعليًا "كلمة سر" المعمل بالكامل - أي حد يعرفه يقدر يوصل
+// لكل بيانات المرضى بتاعت المعمل ده (زي ما موضح في gemini-proxy). كان بيتولد
+// بـ Math.random()، وده مولّد أرقام عشوائية عادي (مش مصمم للأمان) - نظريًا
+// ممكن حد يتنبأ بمخرجاته لو شاف عدد كافي من النتائج قبل كده. بنستخدم بدل
+// منه crypto.getRandomValues، وهو المولّد المخصص فعليًا للاستخدامات
+// الأمنية زي التوكنات وكلمات السر.
 const generateActivationCode = () => {
   let code = 'LAB-'
+  const randomBytes = new Uint32Array(8)
+  crypto.getRandomValues(randomBytes)
   for (let i = 0; i < 8; i++) {
-    code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]
+    code += CODE_CHARS[randomBytes[i] % CODE_CHARS.length]
   }
   return code
 }

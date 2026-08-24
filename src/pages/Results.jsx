@@ -18,6 +18,8 @@ const SAMPLE_STAGES = ['تم التجميع', 'تم الاستلام', 'قيد �
 
 const SECTION_LABELS = { RBC: 'RBC', Platelet: 'Platelet', WBC: 'WBC', WBC_DIFF: 'WBC - Diff' }
 
+const RECENT_DAYS = 90
+
 const periodFilters = [
   { key: 'all', label: 'الكل' },
   { key: 'today', label: 'اليوم' },
@@ -168,6 +170,9 @@ export default function Results() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [periodFilter, setPeriodFilter] = useState('all')
+  // بنحمّل آخر 90 يوم بس افتراضيًا عشان الصفحة تفضل خفيفة مع نمو عدد
+  // المرضى - وبنحمّل السجل الكامل بس لما فعلاً نحتاجه (بحث أو "قبل ذلك")
+  const [historyMode, setHistoryMode] = useState('recent')
   const [selected, setSelected] = useState(null)
   const [resultInput, setResultInput] = useState({})
   const [panelCommentInput, setPanelCommentInput] = useState({})
@@ -182,8 +187,15 @@ export default function Results() {
   const [savingTestId, setSavingTestId] = useState(null)
   const [finalizingPanel, setFinalizingPanel] = useState(null)
 
-  const fetchPatients = async () => {
-    const { data, error } = await supabase.from('patients').select('*, tests(*)').order('created_at', { ascending: false })
+  const fetchPatients = async (mode) => {
+    var useMode = mode || historyMode
+    var query = supabase.from('patients').select('*, tests(*)').order('created_at', { ascending: false })
+    if (useMode === 'recent') {
+      var cutoff = new Date()
+      cutoff.setDate(cutoff.getDate() - RECENT_DAYS)
+      query = query.gte('created_at', cutoff.toISOString())
+    }
+    const { data, error } = await query
     if (error) {
       showToast('حصل خطأ أثناء تحميل قائمة المرضى: ' + error.message, 'error', 5000)
     }
@@ -191,7 +203,19 @@ export default function Results() {
     setLoading(false)
   }
 
-  useEffect(() => { fetchPatients() }, [])
+  useEffect(() => { fetchPatients('recent') }, [])
+
+  // البحث وفلتر "قبل ذلك" لازم يشوفوا التاريخ الكامل مش بس آخر 90 يوم -
+  // لو المستخدم بدأ يبحث أو اختار "قبل ذلك"، بنحمّل السجل الكامل مرة واحدة
+  // بصمت في الخلفية (بدل ما نحمّله دايمًا من الأول لكل زيارة للصفحة)
+  useEffect(() => {
+    if (historyMode === 'full') return
+    if (search.trim() !== '' || periodFilter === 'older') {
+      setHistoryMode('full')
+      fetchPatients('full')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, periodFilter])
 
   const updateTest = async (testId, value, status, testName, patient) => {
     setSavingTestId(testId)
@@ -424,6 +448,16 @@ export default function Results() {
         <span className="text-xs self-center mr-1" style={{ color: 'var(--on-surface-variant)' }}>
           {filtered.length} نتيجة
         </span>
+        {historyMode === 'recent' && (
+          <button
+            onClick={() => { setHistoryMode('full'); fetchPatients('full') }}
+            className="px-3 py-1 rounded-full text-xs font-medium transition-all"
+            style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}
+            title={'حاليًا بتشوف آخر ' + RECENT_DAYS + ' يوم بس - دوس هنا لعرض كل سجل المعمل'}
+          >
+            📜 عرض كل السجل (آخر {RECENT_DAYS} يوم دلوقتي)
+          </button>
+        )}
       </div>
 
       <input type="text" placeholder="ابحث عن مريض..." value={search}

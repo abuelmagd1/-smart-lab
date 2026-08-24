@@ -64,12 +64,20 @@ Deno.serve(async (req) => {
   // 1. تحقق من كود التفعيل وجيب user_id بتاع المعمل ده بس
   const { data: lab, error: labError } = await admin
     .from('lab_settings')
-    .select('user_id, lab_name, is_active')
+    .select('user_id, lab_name, is_active, subscription_expires_at')
     .eq('activation_code', activation_code)
     .single()
 
   if (labError || !lab || !lab.is_active) {
     return json({ error: 'كود التفعيل غير صحيح أو غير مفعل' }, 401)
+  }
+
+  // نفس قاعدة الموقع بالظبط: subscription_expires_at = null معناها اشتراك
+  // مفتوح من غير تاريخ انتهاء. لو فيه تاريخ واتعدى، لازم جهاز التحليل يتوقف
+  // برضو مش بس واجهة الموقع - قبل كده كان الجهاز بيفضل شغال ويكتب نتايج حتى
+  // لو الاشتراك خلص، طالما is_active لسه true يدويًا.
+  if (lab.subscription_expires_at && new Date(lab.subscription_expires_at).getTime() < Date.now()) {
+    return json({ error: 'اشتراك المعمل ده منتهي. تواصل مع الدعم الفني للتجديد.' }, 402)
   }
 
   const userId = lab.user_id
@@ -98,15 +106,34 @@ Deno.serve(async (req) => {
     const { testId, value } = payload
     if (!testId || typeof testId !== 'string') return json({ error: 'testId مطلوب' }, 400)
 
-    // بنتأكد إن التحليل ده فعلاً بتاع مريض تابع لنفس المعمل قبل التحديث
+    // بنتأكد إن التحليل ده فعلاً بتاع مريض تابع لنفس المعمل قبل التحديث،
+    // وبنجيب الـ status الحالي عشان نمنع الجهاز من الكتابة فوق نتيجة
+    // اتراجعت واتعتمدت ('معتمد') بالفعل من فني المعمل - ده ممكن يحصل لو
+    // الجهاز بعت رسالة متأخرة أو مكررة بعد ما حد اعتمد النتيجة يدويًا.
     const { data: testRow, error: testFetchError } = await admin
       .from('tests')
-      .select('id, patients!inner(user_id)')
+      .select('id, status, value, patients!inner(user_id)')
       .eq('id', testId)
       .single()
 
     if (testFetchError || !testRow || testRow.patients?.user_id !== userId) {
       return json({ error: 'غير مصرح بتعديل هذا التحليل' }, 403)
+    }
+
+    // حماية سلامة البيانات: نتيجة مُعتمدة ('معتمد') بقت نهائية من وجهة نظر
+    // العمل - ميجوزش تتغيّر تلقائيًا من غير تدخل بشري صريح. لو الجهاز بعت
+    // نفس القيمة تاني (رسالة مكررة) بنقبلها بصمت لأنها مش هتغيّر حاجة فعليًا،
+    // لكن لو القيمة مختلفة بنرفض الكتابة ونبلّغ الـ bridge عشان يسجّلها كتعارض
+    // يحتاج مراجعة يدوية، بدل ما نكتم الفرق ده.
+    if (testRow.status === 'معتمد') {
+      if (String(testRow.value ?? '') === String(value)) {
+        return json({ ok: true, skipped: 'already_approved_same_value' })
+      }
+      return json({
+        error: 'رُفض التحديث: النتيجة دي معتمدة بالفعل بقيمة مختلفة. راجعها يدويًا في نظام المعمل.',
+        conflict: true,
+        currentStatus: testRow.status,
+      }, 409)
     }
 
     const { error } = await admin

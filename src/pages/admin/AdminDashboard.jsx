@@ -169,24 +169,28 @@ export default function AdminDashboard() {
   const deleteLab = async (lab) => {
     setDeletingId(lab.id)
     try {
-      // مسح اللوجو من الـ Storage لو موجود
-      if (lab.logo_url) {
-        await supabase.storage.from('logos').remove([`${lab.user_id}.jpg`])
-      }
-      // مسح بيانات المعمل
-      const { error: settingsError } = await supabase.from('lab_settings').delete().eq('id', lab.id)
-      if (settingsError) {
-        showFeedback('فشل حذف المعمل: ' + settingsError.message, 'error')
+      // الحذف النهائي بقى بيتم كله عن طريق Edge Function واحدة (بدل ما كان
+      // بيمسح بس lab_settings و profiles ويسيب المرضى والتحاليل وحساب
+      // الدخول نفسه موجودين للأبد). ده لازم يحصل سيرفر-سايد لأن مسح حساب
+      // الـ Auth فعليًا محتاج صلاحية service_role مينفعش تكون في المتصفح.
+      const { data: { session } } = await supabase.auth.getSession()
+      const response = await fetch(supabase.supabaseUrl + '/functions/v1/admin-delete-lab', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabase.supabaseKey,
+          Authorization: 'Bearer ' + session?.access_token,
+        },
+        body: JSON.stringify({ labUserId: lab.user_id }),
+      })
+      const result = await response.json()
+
+      if (!response.ok) {
+        showFeedback('فشل حذف المعمل: ' + (result.error || 'خطأ غير معروف'), 'error')
         return
       }
-      // مسح الدور من profiles
-      const { error: profileError } = await supabase.from('profiles').delete().eq('id', lab.user_id)
-      if (profileError) {
-        showFeedback('اتمسح المعمل لكن فشل مسح صلاحية الحساب: ' + profileError.message, 'error')
-      } else {
-        showFeedback('تم حذف المعمل بنجاح 🗑️')
-      }
 
+      showFeedback('تم حذف المعمل نهائيًا (مرضاه، تحاليله، وحساب الدخول) 🗑️')
       setDeleteConfirm(null)
       await fetchLabs()
     } catch (err) {
@@ -381,11 +385,12 @@ export default function AdminDashboard() {
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm" dir="rtl">
             <h2 className="font-bold text-lg mb-2" style={{ color: '#dc2626' }}>⚠️ تأكيد الحذف</h2>
             <p className="text-sm mb-2" style={{ color: 'var(--on-surface-variant)' }}>
-              هيتم حذف معمل <strong>{deleteConfirm.lab_name}</strong> وكل بياناته نهائيًا من اللوحة.
+              هيتم حذف معمل <strong>{deleteConfirm.lab_name}</strong> نهائيًا: كل مرضاه، كل تحاليلهم،
+              وحساب تسجيل الدخول بتاعه بالكامل. الإجراء ده <strong>مينفعش يتراجع فيه</strong>.
             </p>
             <p className="text-xs mb-5" style={{ color: '#92400e', background: '#fef3c7', padding: '8px', borderRadius: '8px' }}>
-              ملحوظة: حساب الدكتور لتسجيل الدخول هيفضل موجود في Authentication، لازم تمسحه يدويًا من Supabase لو عاوز تقفله نهائي.
-              لو محتاج توقف المعمل مؤقتًا بدل الحذف النهائي، استخدم سويتش "مفعّل" في الكارت بدل الحذف.
+              لو محتاج توقف المعمل مؤقتًا بس (يقدر يرجع تاني، وبياناته تفضل محفوظة)، استخدم سويتش
+              "مفعّل" في الكارت بدل الحذف النهائي.
             </p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setDeleteConfirm(null)} disabled={deletingId === deleteConfirm.id}

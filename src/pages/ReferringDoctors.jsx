@@ -18,11 +18,23 @@ export default function ReferringDoctors() {
 
   const nameInputRef = useRef(null)
 
-  const fetchAll = async () => {
+  // نفس فكرة Results.jsx بالظبط: بنحمّل آخر 90 يوم افتراضيًا عشان الصفحة
+  // تفضل خفيفة، وبنحمّل السجل الكامل بصمت بس لو المستخدم فعليًا اختار "الكل"
+  const RECENT_DAYS = 90
+  const [historyMode, setHistoryMode] = useState('recent')
+
+  const fetchAll = async (mode) => {
+    var useMode = mode || historyMode
     setLoading(true)
+    var patientsQuery = supabase.from('patients').select('id, doctor, created_at, tests(price, panel_instance_id)')
+    if (useMode === 'recent') {
+      var cutoff = new Date()
+      cutoff.setDate(cutoff.getDate() - RECENT_DAYS)
+      patientsQuery = patientsQuery.gte('created_at', cutoff.toISOString())
+    }
     const [doctorsRes, patientsRes] = await Promise.all([
       supabase.from('referring_doctors').select('*').order('name'),
-      supabase.from('patients').select('id, doctor, created_at, tests(price, panel_instance_id)'),
+      patientsQuery,
     ])
     if (doctorsRes.error) showToast('فشل تحميل قائمة الأطباء: ' + doctorsRes.error.message, 'error')
     if (patientsRes.error) showToast('فشل تحميل بيانات المرضى: ' + patientsRes.error.message, 'error')
@@ -31,7 +43,16 @@ export default function ReferringDoctors() {
     setLoading(false)
   }
 
-  useEffect(() => { fetchAll() }, [])
+  useEffect(() => { fetchAll('recent') }, [])
+
+  useEffect(() => {
+    if (historyMode === 'full') return
+    if (periodFilter === 'all' || periodFilter === 'older') {
+      setHistoryMode('full')
+      fetchAll('full')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodFilter])
 
   // إغلاق أي مودال مفتوح بزرار Escape - تجربة استخدام أفضل من غير ما تلمس الماوس
   useEffect(() => {

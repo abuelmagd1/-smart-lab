@@ -113,9 +113,17 @@ export default function Statistics() {
   const fetchAll = async () => {
     setLoading(true)
     setLoadError(false)
+    // بنجيب بس المدى المطلوب فعليًا لعرض الإحصائيات (الفترة الحالية + الفترة
+    // اللي قبلها للمقارنة)، مش كل تاريخ المعمل من أول يوم - نفس الأرقام
+    // بالظبط، بس تحميل أخف وأسرع مع نمو عدد المرضى بمرور الوقت
+    const { start, end } = getRange(periodType, customStart, customEnd)
+    const { start: rangeStart } = getPreviousRange(start, end)
+
     const [patientsRes, expensesRes] = await Promise.all([
-      supabase.from('patients').select('*, tests(*)').order('created_at', { ascending: false }),
-      supabase.from('lab_expenses').select('*').order('expense_date', { ascending: false }),
+      supabase.from('patients').select('*, tests(*)').order('created_at', { ascending: false })
+        .gte('created_at', rangeStart.toISOString()).lt('created_at', end.toISOString()),
+      supabase.from('lab_expenses').select('*').order('expense_date', { ascending: false })
+        .gte('expense_date', rangeStart.toISOString()).lt('expense_date', end.toISOString()),
     ])
 
     if (patientsRes.error) {
@@ -134,7 +142,10 @@ export default function Statistics() {
     setLoading(false)
   }
 
-  useEffect(() => { fetchAll() }, [])
+  // بيحمّل البيانات أول ما الصفحة تفتح، وبعدين أي مرة الفترة (أو التاريخ
+  // المخصص) تتغيّر - عشان يجيب بس المدى المطلوب فعليًا في كل مرة
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchAll() }, [periodType, customStart, customEnd])
 
   const { start, end } = getRange(periodType, customStart, customEnd)
   const { start: prevStart, end: prevEnd } = getPreviousRange(start, end)

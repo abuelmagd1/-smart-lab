@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 
 .env
+
+# Supabase CLI local link cache - contains project ref, pooler DB host, and
+# the linked account's email. Never commit this; it's regenerated locally
+# by `supabase link` and is not needed for anyone else to build/deploy.
+supabase/.temp/
