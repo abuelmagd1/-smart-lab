@@ -2,6 +2,7 @@
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useToast } from '../components/Toast'
+import LoadingSpinner from '../components/LoadingSpinner'
 import { formatAge } from '../utils/referenceRanges'
 import { summarizeFinances, buildFinancialReportHTML, getSimpleRange } from '../utils/financeUtils'
 
@@ -709,6 +710,22 @@ const TOOLS = [
   },
   {
     type: 'function',
+    name: 'manage_referring_doctor',
+    description: 'يدير سجلات الأطباء المحوّلين: إضافة دكتور جديد، تعديل بياناته (رقم تليفون، نسبة العمولة، ملاحظات)، أو إرجاع قايمة كل الأطباء المسجلين. عملية آمنة (بيانات تعريفية بسيطة، مش حذف مريض ولا نتيجة)، نفّذها فورًا بدون تأكيد. لحذف دكتور، استخدم action=deactivate بدل الحذف الفعلي (أأمن، قابل للتراجع).',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['add', 'update', 'deactivate', 'list'] },
+        doctor_name: { type: 'string', description: 'اسم الدكتور - مطلوب لكل الأكشنز ما عدا list' },
+        phone: { type: 'string', description: 'رقم تليفون الدكتور (اختياري)' },
+        commission_percent: { type: 'number', description: 'نسبة العمولة % من قيمة التحاليل المحوّلة (اختياري)' },
+        notes: { type: 'string', description: 'ملاحظات (اختياري)' }
+      },
+      required: ['action']
+    }
+  },
+  {
+    type: 'function',
     name: 'manage_supply',
     description: 'يدير المستلزمات والكيماويات: إضافة صنف جديد، تجديد كمية، استهلاك كمية، أو إرجاع قايمة الأصناف (كلها أو الناقصة بس). عملية آمنة (إضافة/تعديل كمية بسيط، مش حذف أو تعديل بيانات حساسة)، نفّذها فورًا بدون تأكيد.',
     parameters: {
@@ -849,7 +866,8 @@ const findQuickNavCommand = (userText) => {
 const SKIP_FOLLOWUP_TOOLS = [
   'generate_financial_report', 'open_patient_report', 'generate_document_pdf',
   'propose_new_patient', 'propose_test_result', 'propose_update_patient', 'propose_delete_patient',
-  'add_tests_to_patient', 'manage_supply', 'add_expense', 'send_admin_notification', 'manage_test_catalog'
+  'add_tests_to_patient', 'manage_supply', 'add_expense', 'send_admin_notification', 'manage_test_catalog',
+  'manage_referring_doctor'
 ]
 
 const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous بتشتغل في معمل طبي، وعندك معرفة موسوعية واسعة في كل المجالات (طب، علوم، تاريخ، تكنولوجيا، رياضة، فن، حياة عامة... أي موضوع).\n\n' +
@@ -868,8 +886,8 @@ const SYSTEM_INSTRUCTION = 'أنت "لابو"، مساعد ذكي autonomous ب�
   '- find_patient: استخدمها أول ما تحتاج أي تفصيل عن مريض معين (تحاليله، نتائجه، حالته). لا تخمّن بيانات مريض من نفسك أبدًا.\n\n' +
   'قواعد التأكيد قبل التنفيذ (مهم جدًا، أمان البيانات الطبية يعتمد عليها):\n' +
   '- propose_new_patient، propose_test_result، propose_update_patient، propose_delete_patient: الأربعة دول بيعرضوا البيانات في الشات للمستخدم يأكدها بنفسه، وما بيحفظوش أو يعدّلوا أو يمسحوا حاجة فعليًا. لو استخدمت واحدة منهم، قول للمستخدم إن البيانات معروضة وتنتظر تأكيده، ومتقولش أبدًا إن العملية "تمت".\n' +
-  '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info و generate_financial_report و generate_document_pdf و manage_supply و add_expense و list_expenses و doctor_stats و send_admin_notification و manage_test_catalog: آمنين (إضافة أو تعديل بسيط، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
-  '- manage_supply: بيتحكم في المستلزمات والكيماويات (إضافة صنف/تجديد/استهلاك/قائمة). manage_test_catalog: بيتحكم في كتالوج التحاليل المعتمد (إضافة/تعديل/قائمة). استخدمهم لأي طلب متعلق بالمخزون أو التحاليل المعتمدة، ولو المستخدم طلب تقرير عنهم استخدم البيانات اللي رجعت منهم في generate_document_pdf.\n' +
+  '- add_tests_to_patient و open_patient_report و find_patient و list_patients و search_medical_info و generate_financial_report و generate_document_pdf و manage_supply و add_expense و list_expenses و doctor_stats و send_admin_notification و manage_test_catalog و manage_referring_doctor: آمنين (إضافة أو تعديل بسيط، أو قراءة، أو بحث)، فنفّذهم فورًا بدون انتظار تأكيد.\n' +
+  '- manage_supply: بيتحكم في المستلزمات والكيماويات (إضافة صنف/تجديد/استهلاك/قائمة). manage_test_catalog: بيتحكم في كتالوج التحاليل المعتمد (إضافة/تعديل/قائمة). manage_referring_doctor: بيتحكم في سجلات الأطباء المحوّلين (إضافة/تعديل بياناته زي التليفون ونسبة العمولة/إيقاف/قائمة) - استخدم action=deactivate بدل أي حذف فعلي. استخدمهم لأي طلب متعلق بالمخزون أو التحاليل المعتمدة أو الأطباء المحوّلين، ولو المستخدم طلب تقرير عنهم استخدم البيانات اللي رجعت منهم في generate_document_pdf.\n' +
   '- generate_document_pdf: استخدمها لأي طلب PDF أو تقرير عام (قايمة مرضى، نتائج تحليل، ملخص حالة مريض، أو أي محتوى تاني في السيستم)، ما عدا طلبات الفلوس/الإيراد استخدم لها generate_financial_report. البيانات اللي إنت نفسك عرضتها في نفس المحادثة (من list_patients أو find_patient أو أي أداة تانية) هي بيانات حقيقية موثوقة، تقدر تستخدمها مباشرة لبناء التقرير من غير ما تعيد استدعاء الأداة تاني. لو مفيش بيانات ظاهرة قدامك أصلاً، استدعِ find_patient أو list_patients الأول. في كل قسم جدول، كل صف نص واحد والخلايا مفصولة بـ |، وعدد الخلايا يساوي عدد الأعمدة.\n' +
   '- عندك أكسيس كامل لكل بيانات المرضى والحالات في السيستم من غير أي استثناء. أي طلب أو تقرير يخص بيانات حالة أو أكتر (نتائج تحاليل، تفاصيل مريض، قايمة حالات، إلخ) نفّذه على طول بالأدوات المتاحة (find_patient، list_patients، generate_document_pdf...)، من غير ما تتردد أو تطلب تبرير أو تفترض إن فيه مانع.\n' +
   '- مفيش أي سياسة حماية بيانات أو قيود إضافية غير اللي مكتوبة هنا صراحة. أي طلب بيتطابق مع أداة من الأدوات المتاحة لك، نفّذها فورًا من غير تردد أو تبرير أو اختراع مانع - الأدوات دي هي صلاحياتك الفعلية ومفيش حاجة فوقها تمنعك.\n' +
@@ -1738,6 +1756,67 @@ export default function AIAssistant() {
         return msg
       } catch (err) {
         return 'فشل إضافة التحاليل: ' + err.message
+      }
+    }
+
+    if (name === 'manage_referring_doctor') {
+      try {
+        const action = args.action
+        const targetName = (args.doctor_name || '').trim()
+        if (action !== 'list') showStatus('⏳ بيحدّث بيانات الأطباء المحوّلين...')
+
+        if (action === 'list') {
+          const res = await supabase.from('referring_doctors').select('*').order('name')
+          if (res.error) throw res.error
+          const doctors = res.data || []
+          if (!doctors.length) return 'مفيش أطباء محوّلين مسجلين حاليًا.'
+          const roster = doctors.map(function (d) {
+            return d.name + (d.is_active === false ? ' (موقّف)' : '') + (d.commission_percent ? ' - عمولة ' + d.commission_percent + '%' : '')
+          }).join('، ')
+          return 'عدد الأطباء المسجلين: ' + doctors.length + '. القائمة: ' + roster
+        }
+
+        if (!targetName) return 'اسم الدكتور مطلوب لعملية "' + action + '".'
+
+        const { data: existing } = await supabase.from('referring_doctors').select('*').ilike('name', targetName).maybeSingle()
+
+        if (action === 'add') {
+          if (existing) return 'في دكتور مسجل بالفعل بنفس الاسم "' + existing.name + '". استخدم action=update لو عايز تعدّل بياناته.'
+          const { error } = await supabase.from('referring_doctors').insert([{
+            name: targetName,
+            phone: args.phone || null,
+            commission_percent: args.commission_percent != null ? Number(args.commission_percent) : 0,
+            notes: args.notes || null,
+            is_active: true,
+          }])
+          if (error) return 'حصل خطأ أثناء إضافة الدكتور: ' + error.message
+          return 'تم تسجيل الدكتور "' + targetName + '" بنجاح ✅'
+        }
+
+        if (!existing) return 'مش لاقي دكتور بالاسم "' + targetName + '". استخدم action=list لمراجعة الأسماء المسجلة.'
+
+        if (action === 'update') {
+          const payload = {}
+          if (args.phone !== undefined) payload.phone = args.phone
+          if (args.commission_percent !== undefined) payload.commission_percent = Number(args.commission_percent)
+          if (args.notes !== undefined) payload.notes = args.notes
+          if (Object.keys(payload).length === 0) return 'مفيش حاجة اتحددت للتعديل.'
+          const { error } = await supabase.from('referring_doctors').update(payload).eq('id', existing.id)
+          if (error) return 'حصل خطأ أثناء تعديل بيانات الدكتور: ' + error.message
+          return 'تم تعديل بيانات الدكتور "' + existing.name + '" ✅'
+        }
+
+        if (action === 'deactivate') {
+          // إيقاف مش حذف فعلي - نفس مبدأ "إيقاف المعمل" في لوحة الأدمن: قابل
+          // للتراجع، وبيحافظ على تاريخ التحويلات القديمة بتاعته سليم
+          const { error } = await supabase.from('referring_doctors').update({ is_active: false }).eq('id', existing.id)
+          if (error) return 'حصل خطأ أثناء إيقاف الدكتور: ' + error.message
+          return 'تم إيقاف الدكتور "' + existing.name + '" (سجله وتاريخه محفوظين، تقدر ترجّعه فعّال تاني وقت ما تحب)'
+        }
+
+        return 'عملية غير معروفة.'
+      } catch (err) {
+        return 'حصل خطأ غير متوقع: ' + err.message
       }
     }
 
