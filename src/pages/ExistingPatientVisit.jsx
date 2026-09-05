@@ -238,7 +238,14 @@ export default function ExistingPatientVisit() {
     setLoading(false)
 
     if (testsError) {
-      showToast('تم حفظ الزيارة، لكن حصل خطأ أثناء حفظ التحاليل. راجع صفحة نتائج التحاليل.', 'warning', 6000)
+      // نفس مبدأ NewPatient.jsx: زيارة من غير أي تحليل مربوط بيها مربكة لموظفي
+      // المعمل - بنتراجع عن إنشاء الزيارة نفسها بدل ما نسيبها معلّقة بلا تحاليل
+      const { error: rbVisit } = await supabase.from('patients').delete().eq('id', visit.id)
+      if (rbVisit) {
+        showToast('حصل خطأ أثناء حفظ التحاليل، وفشلنا كمان نلغي الزيارة (ID: ' + visit.id + '). كلّم الدعم الفني بالرقم ده. تفاصيل الخطأ: ' + testsError.message, 'error', 8000)
+      } else {
+        showToast('حصل خطأ أثناء حفظ التحاليل، اتلغت الزيارة. جرّب تاني: ' + testsError.message, 'error', 6000)
+      }
       return
     }
 

@@ -9,6 +9,21 @@ import { useToast } from '../components/Toast'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 
+// حماية من XSS: بيانات المريض والتحاليل (الاسم، القيمة، الوحدة، تعليق الطبيب...)
+// بتتحط جوه HTML خام بيتحقن بـ innerHTML أو srcdoc (للطباعة والمشاركة على واتساب).
+// من غير escaping، أي اسم مريض أو نتيجة تحليل فيها نص زي "<img src=x onerror=...>"
+// كانت هتتنفذ فعليًا كسكريبت في متصفح الموظف - مش بس تتعرض كنص. الدالة دي بتحوّل
+// أي HTML خام لنص عادي آمن قبل ما يتحط جوه القالب.
+const escapeHtml = (value) => {
+  if (value === null || value === undefined) return ''
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 const resultColor = {
   'طبيعي': { color: '#065f46', bg: '#d1fae5' },
   'مرتفع': { color: '#92400e', bg: '#fef3c7' },
@@ -394,21 +409,21 @@ export default function Reports() {
       let rowsHtml = ''
       items.forEach(item => {
         if (isDiff) {
-          const flagLabel = item.flag ? ('<b>' + item.flag + '</b> ') : ''
+          const flagLabel = item.flag ? ('<b>' + escapeHtml(item.flag) + '</b> ') : ''
           rowsHtml += '<tr>' +
-            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + ttc + ';">' + item.name + '</td>' +
-            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + flagColor(item.flag) + '; font-weight:' + (item.flag ? 'bold' : 'normal') + ';">' + flagLabel + (item.relative_value || '---') + '</td>' +
-            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + (item.normal_range || '') + '</td>' +
-            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + flagColor(item.flag) + '; font-weight:' + (item.flag ? 'bold' : 'normal') + ';">' + flagLabel + (item.absolute_value || '---') + '</td>' +
-            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + (item.absolute_range || '') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + ttc + ';">' + escapeHtml(item.name) + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + flagColor(item.flag) + '; font-weight:' + (item.flag ? 'bold' : 'normal') + ';">' + flagLabel + escapeHtml(item.relative_value || '---') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + escapeHtml(item.normal_range || '') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + flagColor(item.flag) + '; font-weight:' + (item.flag ? 'bold' : 'normal') + ';">' + flagLabel + escapeHtml(item.absolute_value || '---') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + escapeHtml(item.absolute_range || '') + '</td>' +
             '</tr>'
         } else {
-          const flagLabel = item.flag ? ('<b>' + item.flag + '</b> ') : ''
+          const flagLabel = item.flag ? ('<b>' + escapeHtml(item.flag) + '</b> ') : ''
           rowsHtml += '<tr>' +
-            '<td colspan="2" style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + ttc + ';"><strong>' + item.name + '</strong></td>' +
-            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + flagColor(item.flag) + '; font-weight:' + (item.flag ? 'bold' : 'normal') + ';">' + flagLabel + (item.value || '---') + '</td>' +
-            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + (item.unit || '') + '</td>' +
-            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + (item.normal_range || '') + '</td>' +
+            '<td colspan="2" style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + ttc + ';"><strong>' + escapeHtml(item.name) + '</strong></td>' +
+            '<td style="padding:3px 8px; font-size:' + fontSize + 'px; color:' + flagColor(item.flag) + '; font-weight:' + (item.flag ? 'bold' : 'normal') + ';">' + flagLabel + escapeHtml(item.value || '---') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + escapeHtml(item.unit || '') + '</td>' +
+            '<td style="padding:3px 8px; font-size:' + (fontSize - 1) + 'px; color:#666;">' + escapeHtml(item.normal_range || '') + '</td>' +
             '</tr>'
         }
       })
@@ -422,7 +437,7 @@ export default function Reports() {
           '</tr>'
       } else {
         header = '<tr style="background:' + tc + '12;">' +
-          '<td colspan="5" style="padding:4px 8px; font-weight:bold; font-size:' + fontSize + 'px; color:' + tc + ';">■  ' + (SECTION_LABELS[section] || section) + '</td>' +
+          '<td colspan="5" style="padding:4px 8px; font-weight:bold; font-size:' + fontSize + 'px; color:' + tc + ';">■  ' + (SECTION_LABELS[section] || escapeHtml(section)) + '</td>' +
           '</tr>'
       }
 
@@ -435,7 +450,7 @@ export default function Reports() {
     let commentHtml = ''
     if (group.comment) {
       commentHtml = '<div style="margin-top:8px; padding:6px 8px; background:#f8f9fa; border-right:3px solid ' + tc + '; font-size:' + (fontSize - 1) + 'px; color:#333;">' +
-        '<strong style="color:' + tc + ';">Comment: </strong>' + group.comment +
+        '<strong style="color:' + tc + ';">Comment: </strong>' + escapeHtml(group.comment) +
         '</div>'
     }
 
@@ -461,7 +476,7 @@ export default function Reports() {
       HISTORY_COLUMNS.forEach(c => {
         const item = row.byName[c.key]
         const val = c.abs ? (item ? item.absolute_value : '-') : (item ? item.value : '-')
-        cells += '<td style="padding:3px 5px; font-size:9px; border:1px solid #ccc; text-align:center;">' + (val || '-') + '</td>'
+        cells += '<td style="padding:3px 5px; font-size:9px; border:1px solid #ccc; text-align:center;">' + escapeHtml(val || '-') + '</td>'
       })
       rowsHtml += '<tr><td style="padding:3px 5px; font-size:9px; border:1px solid #ccc; font-weight:bold;">' + dateStr + '</td>' + cells + '</tr>'
     })
@@ -553,7 +568,7 @@ export default function Reports() {
 
     const tableRows = Object.entries(groups).map(([category, tests]) => `
       <tr style="background:${tc}18;">
-        <td colspan="${colSpanCount}" style="padding:6px 10px; font-weight:bold; font-size:${fs + 1}px; color:${tc}; border-top:1px solid ${tc}40; border-bottom:1px solid ${tc}40;">■  ${category}</td>
+        <td colspan="${colSpanCount}" style="padding:6px 10px; font-weight:bold; font-size:${fs + 1}px; color:${tc}; border-top:1px solid ${tc}40; border-bottom:1px solid ${tc}40;">■  ${escapeHtml(category)}</td>
       </tr>
       ${tests.map((t, ti) => {
         const num = parseFloat(String(t.value || '').replace(',', '.'))
@@ -567,10 +582,10 @@ export default function Reports() {
         const isAbnormal = status === 'مرتفع' || status === 'منخفض'
         const rowBg = zebra ? (ti % 2 === 0 ? 'white' : '#fafafa') : 'white'
         const cells = [
-          `<td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">■  ${t.name}</td>`,
-          `<td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${color}; font-weight:${boldAbnormal && isAbnormal ? 'bold' : 'normal'};">${t.value || '---'}</td>`,
-          showUnit ? `<td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">${t.unit || ''}</td>` : '',
-          showRange ? `<td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">${t.normal_range || '---'}</td>` : '',
+          `<td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">■  ${escapeHtml(t.name)}</td>`,
+          `<td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${color}; font-weight:${boldAbnormal && isAbnormal ? 'bold' : 'normal'};">${escapeHtml(t.value || '---')}</td>`,
+          showUnit ? `<td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">${escapeHtml(t.unit || '')}</td>` : '',
+          showRange ? `<td style="padding:6px 10px; font-size:${fs}px; border-bottom:1px solid #eee; color:${ttc};">${escapeHtml(t.normal_range || '---')}</td>` : '',
         ].join('')
         return `<tr style="background:${rowBg};">${cells}</tr>`
       }).join('')}
@@ -598,7 +613,7 @@ export default function Reports() {
       <hr style="border:none; border-top:2px solid ${hc}; margin:10px 0;" />
       ${showHeaderBanner ? `
       <div style="background:${hc}; color:white; text-align:center; padding:6px; font-size:${fs + 2}px; font-weight:bold; margin-bottom:12px; border-radius:3px; letter-spacing:1px;">
-        ${headerTitle}
+        ${escapeHtml(headerTitle)}
       </div>` : ''}
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px 30px; flex:1;">
@@ -611,7 +626,7 @@ export default function Reports() {
           ].map(([label, value]) => `
             <div style="display:flex; gap:5px; font-size:${fs}px;">
               <span style="font-weight:bold; color:${hc}; white-space:nowrap;">${label}</span>
-              <span style="color:#333;">${value}</span>
+              <span style="color:#333;">${escapeHtml(value)}</span>
             </div>
           `).join('')}
         </div>
@@ -629,11 +644,11 @@ export default function Reports() {
           ختم المعمل
         </div>` : '<div></div>'}
         <div style="text-align:center;">
-          <div style="font-size:${fs + 1}px; font-weight:bold; color:${hc}; margin-bottom:25px;">Dr. ${doctorName}</div>
+          <div style="font-size:${fs + 1}px; font-weight:bold; color:${hc}; margin-bottom:25px;">Dr. ${escapeHtml(doctorName)}</div>
           ${showSignatureLine ? `<div style="width:160px; border-bottom:1px solid ${hc}; margin:0 auto;"></div>` : ''}
         </div>
       </div>
-      ${footerNote ? `<div style="margin-top:10px; font-size:${fs - 1}px; color:#666; text-align:center;">${footerNote}</div>` : ''}
+      ${footerNote ? `<div style="margin-top:10px; font-size:${fs - 1}px; color:#666; text-align:center;">${escapeHtml(footerNote)}</div>` : ''}
     `
   }
 

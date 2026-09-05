@@ -927,6 +927,33 @@ export default function AIAssistant() {
   const contextDigestRef = useRef('') // ملخص محلي (بدون Gemini) لآخر كام رسالة قبل ما نبدأ سياق جديد، بيتحقن مرة واحدة في أول رسالة بعد الريست
   const [isOnline, setIsOnline] = useState(function () { return typeof navigator === 'undefined' || navigator.onLine })
   const [serviceDegraded, setServiceDegraded] = useState(false)
+  // BYOK: كل معمل بيجيب مفتاح Gemini بتاعه هو (مجاني من Google AI Studio) بدل
+  // ما يشارك مفتاح واحد مع كل المعامل التانية - أول مرة بس، وبعدها بيتحفظ
+  // ويشتغل تلقائي من غير ما يتكرر السؤال
+  const [geminiKeyStatus, setGeminiKeyStatus] = useState('checking') // checking | missing | present
+  const [geminiKeyInput, setGeminiKeyInput] = useState('')
+  const [savingGeminiKey, setSavingGeminiKey] = useState(false)
+
+  useEffect(function () {
+    (async function () {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { setGeminiKeyStatus('missing'); return }
+      const { data } = await supabase.from('lab_settings').select('gemini_api_key').eq('user_id', user.id).maybeSingle()
+      setGeminiKeyStatus(data && data.gemini_api_key ? 'present' : 'missing')
+    })()
+  }, [])
+
+  const saveGeminiKey = async function () {
+    const key = geminiKeyInput.trim()
+    if (!key) { showToast('من فضلك الصق المفتاح الأول', 'error'); return }
+    setSavingGeminiKey(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('lab_settings').update({ gemini_api_key: key }).eq('user_id', user.id)
+    setSavingGeminiKey(false)
+    if (error) { showToast('حصل خطأ أثناء حفظ المفتاح: ' + error.message, 'error'); return }
+    setGeminiKeyStatus('present')
+    showToast('تم حفظ المفتاح - المساعد الذكي جاهز دلوقتي ✅')
+  }
 
   useEffect(function () {
     const handleOffline = function () { setIsOnline(false) }
@@ -971,6 +998,43 @@ export default function AIAssistant() {
 
   if (!historyRef.current || Array.isArray(historyRef.current)) {
     historyRef.current = { previousId: null }
+  }
+
+  if (geminiKeyStatus === 'checking') {
+    return <div className="p-6" dir="rtl"><LoadingSpinner /></div>
+  }
+
+  if (geminiKeyStatus === 'missing') {
+    return (
+      <div className="p-6 max-w-lg mx-auto" dir="rtl">
+        <div className="rounded-2xl p-6" style={{ background: 'var(--surface)', border: '1px solid var(--outline-variant)' }}>
+          <h2 className="font-bold text-lg mb-2" style={{ color: 'var(--on-surface)' }}>🔑 لازم مفتاح Gemini الأول</h2>
+          <p className="text-sm mb-4" style={{ color: 'var(--on-surface-variant)' }}>
+            المساعد الذكي بيشتغل بمفتاح API مجاني خاص بمعملك (من Google، مش منّا) - كده كل معمل عنده حصته الخاصة
+            من غير ما يشارك مع معامل تانية. الخطوة دي مرة واحدة بس، وبعدها هيشتغل تلقائي كل مرة.
+          </p>
+          <ol className="text-sm mb-4 space-y-1 list-decimal pr-5" style={{ color: 'var(--on-surface)' }}>
+            <li>افتح <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline" style={{ color: 'var(--primary-container)' }}>aistudio.google.com/apikey</a> (مجاني، محتاج حساب Google بس)</li>
+            <li>دوس "Create API key" وانسخه</li>
+            <li>الصقه هنا تحت واحفظ</li>
+          </ol>
+          <input
+            type="text"
+            value={geminiKeyInput}
+            onChange={e => setGeminiKeyInput(e.target.value)}
+            placeholder="الصق مفتاح Gemini هنا"
+            className="w-full px-3 py-2.5 rounded-xl text-sm mb-3 text-left"
+            dir="ltr"
+            style={{ border: '1px solid var(--outline-variant)', background: 'var(--surface-container)', color: 'var(--on-surface)' }}
+          />
+          <button onClick={saveGeminiKey} disabled={savingGeminiKey}
+            className="w-full py-2.5 rounded-xl font-medium text-sm text-white"
+            style={{ background: 'var(--primary-container)', opacity: savingGeminiKey ? 0.7 : 1 }}>
+            {savingGeminiKey ? 'جاري الحفظ...' : 'حفظ وتفعيل المساعد الذكي'}
+          </button>
+        </div>
+      </div>
+    )
   }
 
   const getPatientWithTests = async (patientId) => {

@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom'
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabase'
 import ErrorBoundary from '../components/ErrorBoundary'
@@ -71,10 +71,15 @@ const getSubscriptionStatus = (expiresAt) => {
 }
 
 export default function Layout() {
+  const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
+  // لوحة التنقل السريع (Ctrl+K) - عشان أي حد يقدر يقفز لأي صفحة من غير ما
+  // يشيل إيده عن الكيبورد أو يدور بالماوس في الشريط الجانبي
+  const [showPalette, setShowPalette] = useState(false)
+  const [paletteQuery, setPaletteQuery] = useState('')
   const [adminNotifications, setAdminNotifications] = useState([])
   const [lastSeenAt, setLastSeenAt] = useState(null)
   const [user, setUser] = useState(null)
@@ -220,6 +225,12 @@ export default function Layout() {
         setShowNotifications(false)
         setShowSettings(false)
         setShowProfile(false)
+        setShowPalette(false)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteQuery('')
+        setShowPalette(function (prev) { return !prev })
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -402,6 +413,12 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+          <button onClick={() => { setPaletteQuery(''); setShowPalette(true) }}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-sm mb-2"
+            style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+            <span className="flex items-center gap-2">🔎 روح لصفحة...</span>
+            <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--surface-variant)' }}>Ctrl+K</span>
+          </button>
           {navItems.map((item, i) => (
             <NavLink key={i} to={item.path}
               className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all"
@@ -701,6 +718,56 @@ export default function Layout() {
           <Outlet context={{ settings, chatMessages, setChatMessages, chatHistoryRef }} />
         </ErrorBoundary>
       </main>
+
+      {showPalette && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 px-4"
+          style={{ background: 'rgba(0,0,0,0.4)' }}
+          onClick={() => setShowPalette(false)}>
+          <div onClick={e => e.stopPropagation()}
+            className="w-full max-w-md rounded-xl overflow-hidden shadow-2xl"
+            style={{ background: 'var(--surface)' }}>
+            <input
+              autoFocus
+              type="text"
+              value={paletteQuery}
+              onChange={e => setPaletteQuery(e.target.value)}
+              placeholder="روح لصفحة... (اكتب اسمها)"
+              className="w-full px-4 py-3 outline-none text-right"
+              style={{ borderBottom: '1px solid var(--outline-variant)', fontSize: '15px', background: 'transparent', color: 'var(--on-surface)' }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  const q = paletteQuery.trim()
+                  const match = navItems.find(i => i.label.includes(q)) || (q === '' ? navItems[0] : null)
+                  if (match) { navigate(match.path); setShowPalette(false) }
+                }
+              }}
+            />
+            <div className="max-h-72 overflow-y-auto py-1">
+              {navItems
+                .filter(i => i.label.includes(paletteQuery.trim()))
+                .map(item => (
+                  <button key={item.path}
+                    onClick={() => { navigate(item.path); setShowPalette(false) }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-right"
+                    style={{ color: 'var(--on-surface)' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-variant)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <span>{item.icon}</span>
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              {navItems.filter(i => i.label.includes(paletteQuery.trim())).length === 0 && (
+                <p className="text-sm text-center py-6" style={{ color: 'var(--on-surface-variant)' }}>مفيش صفحة بالاسم ده</p>
+              )}
+            </div>
+            <div className="px-4 py-2 text-xs flex justify-between" style={{ borderTop: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
+              <span>Enter للفتح</span>
+              <span>Esc للإغلاق</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

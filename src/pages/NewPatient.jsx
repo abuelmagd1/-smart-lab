@@ -193,7 +193,17 @@ export default function NewPatient() {
       .select().single()
 
     if (error) {
-      showToast('تم إنشاء ملف المريض، لكن حصل خطأ أثناء حفظ بيانات الزيارة: ' + error.message, 'error')
+      // إنشاء ملف المريض (patient_profiles) والزيارة (patients) خطوتين منفصلتين -
+      // لو الأولى نجحت والتانية فشلت (انقطاع نت مثلاً)، كان بيفضل ملف مريض "شبح"
+      // بلا أي زيارة أو تحليل مربوط بيه، محفوظ للأبد في قاعدة البيانات من غير داعي.
+      // بنحاول نتراجع عن الخطوة الأولى (نمسح الملف اللي اتعمل لسه) عشان منسيبش
+      // بيانات ناقصة/يتيمة ورا بعضنا
+      const { error: rollbackError } = await supabase.from('patient_profiles').delete().eq('id', profile.id)
+      if (rollbackError) {
+        showToast('حصل خطأ أثناء حفظ بيانات الزيارة، وفشلنا كمان نلغي ملف المريض اللي اتعمل جزئيًا (ID: ' + profile.id + '). كلّم الدعم الفني بالرقم ده. تفاصيل الخطأ: ' + error.message, 'error', 8000)
+      } else {
+        showToast('حصل خطأ أثناء حفظ بيانات الزيارة، جرّب تاني: ' + error.message, 'error')
+      }
       setLoading(false)
       return
     }
@@ -257,7 +267,16 @@ export default function NewPatient() {
     const { error: testsError } = await supabase.from('tests').insert(allRows)
 
     if (testsError) {
-      showToast('تم حفظ بيانات المريض، لكن حصل خطأ أثناء حفظ التحاليل. راجع صفحة نتائج التحاليل.', 'warning', 6000)
+      // نفس المبدأ: لو فشل حفظ التحاليل، بيفضل عندنا "زيارة شبح" - مريض متسجل
+      // بس من غير أي تحليل مربوط بيه، مربّك لموظفي المعمل لو شافوه في القائمة.
+      // بنتراجع عن الخطوتين اللي فاتوا (الزيارة وملف المريض) بدل ما نسيب حالة ناقصة
+      const { error: rbPatient } = await supabase.from('patients').delete().eq('id', patient.id)
+      const { error: rbProfile } = await supabase.from('patient_profiles').delete().eq('id', profile.id)
+      if (rbPatient || rbProfile) {
+        showToast('حصل خطأ أثناء حفظ التحاليل، وفشلنا كمان نلغي تسجيل المريض بالكامل (ID: ' + patient.id + '). كلّم الدعم الفني بالرقم ده. تفاصيل الخطأ: ' + testsError.message, 'error', 8000)
+      } else {
+        showToast('حصل خطأ أثناء حفظ التحاليل، اتلغى التسجيل بالكامل. جرّب تاني: ' + testsError.message, 'error', 6000)
+      }
       setLoading(false)
       return
     }
@@ -409,6 +428,7 @@ export default function NewPatient() {
                   {field.label}{field.required && <span style={{ color: '#dc2626' }}> *</span>}
                 </label>
                 <input id={field.key} type={field.type} placeholder={field.placeholder} value={form[field.key]}
+                  autoFocus={field.key === 'name'}
                   onChange={e => setForm(prev => ({ ...prev, [field.key]: e.target.value }))}
                   className="w-full px-4 py-3 rounded-lg outline-none text-right"
                   style={{ border: '1px solid var(--outline-variant)', fontSize: '14px' }}

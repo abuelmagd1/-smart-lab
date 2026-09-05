@@ -84,13 +84,21 @@ export default function Dashboard() {
   const [periodFilter, setPeriodFilter] = useState('all')
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 250)
+  // نفس فكرة Results.jsx بالظبط: أول صفحة بتفتح بعد تسجيل الدخول أهم صفحة
+  // تفضل خفيفة - آخر 90 يوم افتراضيًا، والسجل الكامل بصمت بس لو فعلاً محتاجينه
+  const RECENT_DAYS = 90
+  const [historyMode, setHistoryMode] = useState('recent')
 
-  const fetchData = async () => {
+  const fetchData = async (mode) => {
+    var useMode = mode || historyMode
     setLoadError(false)
-    const { data, error } = await supabase
-      .from('patients')
-      .select('*, tests(*)')
-      .order('created_at', { ascending: false })
+    var query = supabase.from('patients').select('*, tests(*)').order('created_at', { ascending: false })
+    if (useMode === 'recent') {
+      var cutoff = new Date()
+      cutoff.setDate(cutoff.getDate() - RECENT_DAYS)
+      query = query.gte('created_at', cutoff.toISOString())
+    }
+    const { data, error } = await query
 
     if (error) {
       console.error('فشل جلب بيانات المرضى:', error)
@@ -105,10 +113,20 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    fetchData()
+    fetchData('recent')
     const timer = setInterval(() => setNow(new Date()), 60000)
     return () => clearInterval(timer)
   }, [])
+
+  // زي Results.jsx بالظبط: البحث وفلتر "قبل ذلك" لازم يشوفوا التاريخ الكامل
+  useEffect(() => {
+    if (historyMode === 'full') return
+    if (debouncedSearch.trim() !== '' || periodFilter === 'older') {
+      setHistoryMode('full')
+      fetchData('full')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, periodFilter])
 
   const getFormattedDate = () => {
     const day = dayNames[now.getDay()]
@@ -208,9 +226,21 @@ export default function Dashboard() {
         <div className="p-4 space-y-3" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <h2 className="font-semibold" style={{ color: 'var(--on-surface)'}}>المرضى</h2>
-            <span className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-              {loading ? '...' : `${filteredPatients.length} نتيجة`}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+                {loading ? '...' : `${filteredPatients.length} نتيجة`}
+              </span>
+              {historyMode === 'recent' && (
+                <button
+                  onClick={() => { setHistoryMode('full'); fetchData('full') }}
+                  className="px-2 py-0.5 rounded-full text-xs font-medium"
+                  style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}
+                  title={'حاليًا بتشوف آخر ' + RECENT_DAYS + ' يوم بس - دوس هنا لعرض كل سجل المعمل'}
+                >
+                  📜 عرض كل السجل
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex gap-2 flex-wrap">
