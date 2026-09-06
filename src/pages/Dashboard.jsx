@@ -4,6 +4,7 @@ import { supabase } from '../supabase'
 import EmptyState from '../components/EmptyState'
 import useDebounce from '../hooks/useDebounce'
 import { useToast } from '../components/Toast'
+import { summarizeFinances } from '../utils/financeUtils'
 
 const statusStyle = {
   'تم التجميع': { bg: '#f3f4f6', color: '#374151' },
@@ -144,6 +145,57 @@ export default function Dashboard() {
     })
   }
 
+  const [weeklyExpenses, setWeeklyExpenses] = useState([])
+  const [labNameForReport, setLabNameForReport] = useState('')
+  const [showWeeklyReport, setShowWeeklyReport] = useState(false)
+
+  // بيانات آخر 7 أيام كفاية عشان التقرير الأسبوعي - جدول المصروفات صغير عادةً
+  // فمفيش داعي نحمّله مع باقي بيانات الصفحة الرئيسية طول الوقت، بنجيبه بس
+  // لما المستخدم فعليًا يفتح كارت التقرير الأسبوعي
+  const fetchWeeklyExpenses = async () => {
+    const weekAgo = new Date()
+    weekAgo.setDate(weekAgo.getDate() - 7)
+    const [expensesRes, labRes] = await Promise.all([
+      supabase.from('lab_expenses').select('*').gte('expense_date', weekAgo.toISOString()),
+      supabase.from('lab_settings').select('lab_name').eq('user_id', (await supabase.auth.getUser()).data.user?.id).maybeSingle(),
+    ])
+    setWeeklyExpenses(expensesRes.data || [])
+    setLabNameForReport(labRes.data?.lab_name || '')
+  }
+
+  const weekAgoDate = new Date()
+  weekAgoDate.setDate(weekAgoDate.getDate() - 7)
+  const weeklyPatients = patients.filter(p => p.created_at && new Date(p.created_at) >= weekAgoDate)
+  const weeklyStats = summarizeFinances(weeklyPatients, weeklyExpenses)
+
+  const weeklyReportText =
+    '📊 التقرير الأسبوعي - ' + (labNameForReport || 'المعمل') + '\n' +
+    'من ' + weekAgoDate.toLocaleDateString('ar-EG') + ' لحد النهاردة\n\n' +
+    '👥 عدد المرضى: ' + weeklyStats.totalPatients + '\n' +
+    '🧪 عدد التحاليل: ' + weeklyStats.totalOrders + '\n' +
+    '💰 الإيراد: ' + weeklyStats.totalRevenue.toLocaleString('ar-EG') + ' جنيه\n' +
+    '✅ المحصّل: ' + weeklyStats.collected.toLocaleString('ar-EG') + ' جنيه\n' +
+    '⏳ المعلّق: ' + weeklyStats.pending.toLocaleString('ar-EG') + ' جنيه\n' +
+    (weeklyStats.totalExpenses > 0 ? '📉 المصروفات: ' + weeklyStats.totalExpenses.toLocaleString('ar-EG') + ' جنيه\n' : '') +
+    (weeklyStats.ranked.length > 0 ? '\n🔝 أكتر تحليل مطلوب: ' + weeklyStats.ranked[0].name + ' (' + weeklyStats.ranked[0].count + ' مرة)' : '')
+
+  const shareWeeklyReportWhatsApp = () => {
+    // wa.me هو رابط واتساب الرسمي المجاني بالكامل - بيفتح واتساب (تطبيق أو
+    // ويب) مع نص جاهز، والمستخدم بس يختار لمين يبعت ويدوس إرسال. مفيش أي
+    // API أو تكلفة خالص، بس مش أوتوماتيك 100% - محتاج ضغطة إرسال يدوية
+    const url = 'https://wa.me/?text=' + encodeURIComponent(weeklyReportText)
+    window.open(url, '_blank')
+  }
+
+  const copyWeeklyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(weeklyReportText)
+      showToast('تم نسخ التقرير - الصقه في إيميل أو أي مكان تاني ✅')
+    } catch {
+      showToast('تعذّر النسخ التلقائي، انسخ النص يدويًا من الكارت', 'error')
+    }
+  }
+
   const filteredPatients = patients
     .filter(p => periodFilter === 'all' || getBucket(p.created_at) === periodFilter)
     .filter(p => matchesSearch(p, debouncedSearch))
@@ -203,6 +255,29 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <div className="rounded-xl p-4 mb-4 bg-white" style={{ border: '1px solid var(--outline-variant)' }}>
+        <button onClick={() => { setShowWeeklyReport(!showWeeklyReport); if (!showWeeklyReport) fetchWeeklyExpenses() }}
+          className="w-full flex items-center justify-between text-sm font-medium" style={{ color: 'var(--on-surface)' }}>
+          <span>📊 التقرير الأسبوعي (آخر 7 أيام) - جاهز يتبعت لواتساب أو إيميل</span>
+          <span>{showWeeklyReport ? '▲' : '▼'}</span>
+        </button>
+        {showWeeklyReport && (
+          <div className="mt-3">
+            <pre className="text-xs p-3 rounded-lg whitespace-pre-wrap" dir="rtl" style={{ background: 'var(--surface)', color: 'var(--on-surface-variant)', fontFamily: 'inherit' }}>
+              {weeklyReportText}
+            </pre>
+            <div className="flex gap-2 mt-3">
+              <button onClick={shareWeeklyReportWhatsApp} className="flex-1 py-2 rounded-lg text-sm font-medium text-white" style={{ background: '#25D366' }}>
+                📱 مشاركة على واتساب
+              </button>
+              <button onClick={copyWeeklyReport} className="flex-1 py-2 rounded-lg text-sm font-medium" style={{ background: '#f1f3f4', color: 'var(--on-surface-variant)' }}>
+                📋 نسخ (للإيميل)
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {loading ? (

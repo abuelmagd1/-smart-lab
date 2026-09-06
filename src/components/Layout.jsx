@@ -81,6 +81,7 @@ export default function Layout() {
   const [showPalette, setShowPalette] = useState(false)
   const [paletteQuery, setPaletteQuery] = useState('')
   const [adminNotifications, setAdminNotifications] = useState([])
+  const [smartAlerts, setSmartAlerts] = useState([])
   const [lastSeenAt, setLastSeenAt] = useState(null)
   const [user, setUser] = useState(null)
   const [labName, setLabName] = useState('نظام إدارة المعامل الطبية')
@@ -151,6 +152,50 @@ export default function Layout() {
     }
   }
 
+  // تنبيهات ذكية بتتحسب هنا مباشرة (مش رسايل متخزنة) عشان تفضل حديثة دايمًا
+  // وتظهر في كل صفحة من غير ما المستخدم يحتاج يفتح لوحة التحكم أو المستلزمات
+  // تحديدًا عشان يعرف. نفس عتبة "التحليل المتأخر" (3 ساعات) المستخدمة في
+  // لوحة التحكم بالظبط، عشان الرقم يفضل متسق في كل الأماكن.
+  const DELAY_THRESHOLD_HOURS = 3
+  const fetchSmartAlerts = async (userId) => {
+    try {
+      const cutoff = new Date()
+      cutoff.setHours(cutoff.getHours() - 24) // آخر 24 ساعة كفاية لاكتشاف أي تحليل عدّى 3 ساعات
+      const [patientsRes, suppliesRes] = await Promise.all([
+        supabase.from('patients').select('id, name, created_at, tests(name, status)').eq('user_id', userId).gte('created_at', cutoff.toISOString()),
+        supabase.from('lab_supplies').select('id').lte('current_quantity', 0),
+      ])
+
+      let delayedCount = 0
+      const now = new Date()
+      ;(patientsRes.data || []).forEach(function (p) {
+        const hoursSince = (now.getTime() - new Date(p.created_at).getTime()) / (1000 * 60 * 60)
+        if (hoursSince < DELAY_THRESHOLD_HOURS) return
+        ;(p.tests || []).forEach(function (t) {
+          if (t.status !== 'معتمد') delayedCount++
+        })
+      })
+
+      const alerts = []
+      if (delayedCount > 0) {
+        alerts.push({
+          title: '⏰ تحاليل متأخرة', message: 'فيه ' + delayedCount + ' تحليل عدّى عليه أكتر من ' + DELAY_THRESHOLD_HOURS + ' ساعات من غير اعتماد.',
+          created_at: new Date().toISOString(), isSmartAlert: true, linkTo: '/dashboard',
+        })
+      }
+      const lowStockCount = (suppliesRes.data || []).length
+      if (lowStockCount > 0) {
+        alerts.push({
+          title: '🧪 مخزون خالص', message: 'فيه ' + lowStockCount + ' صنف خلص تمامًا من المستلزمات والكيماويات.',
+          created_at: new Date().toISOString(), isSmartAlert: true, linkTo: '/supplies',
+        })
+      }
+      setSmartAlerts(alerts)
+    } catch (err) {
+      console.error('حصل خطأ غير متوقع أثناء حساب التنبيهات الذكية:', err)
+    }
+  }
+
   const getUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
@@ -190,6 +235,7 @@ export default function Layout() {
     setLastSeenAt(savedSeenAt)
 
     fetchAdminNotifications(user.id)
+    fetchSmartAlerts(user.id)
   }
 
   useEffect(() => {
@@ -368,10 +414,12 @@ export default function Layout() {
     }
   }
 
-  // عداد "الجديد" بيحسب بس الإشعارات اللي وصلت بعد آخر مرة فتح فيها المستخدم القائمة
+  // عداد "الجديد" بيحسب الإشعارات اللي وصلت بعد آخر مرة فتح فيها المستخدم القائمة،
+  // بالإضافة للتنبيهات الذكية دايمًا (دي مش "حدث جديد" بمعنى يتقرا ويتنسى - دي حالة
+  // حالية لسه قائمة، زي "لسه فيه تحاليل متأخرة"، فبتفضل في العداد طول ما السبب موجود)
   const totalBadge = adminNotifications.filter(n =>
     !lastSeenAt || new Date(n.created_at) > new Date(lastSeenAt)
-  ).length
+  ).length + smartAlerts.length
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--surface)' }} dir="rtl">
@@ -481,7 +529,18 @@ export default function Layout() {
                     <h3 className="font-semibold text-sm" style={{ color: 'var(--on-surface)' }}>إشعارات الإدارة</h3>
                   </div>
                   <div className="max-h-96 overflow-y-auto">
-                    {adminNotifications.length === 0 ? (
+                    {smartAlerts.map(function (a, i) {
+                      return (
+                        <div key={'smart-' + i} onClick={() => { navigate(a.linkTo); setShowNotifications(false) }}
+                          className="p-3 cursor-pointer" style={{ borderBottom: '1px solid var(--outline-variant)', background: '#fff7ed' }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#ffedd5'}
+                          onMouseLeave={e => e.currentTarget.style.background = '#fff7ed'}>
+                          <p className="text-sm font-medium" style={{ color: '#92400e' }}>{a.title}</p>
+                          <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)' }}>{a.message}</p>
+                        </div>
+                      )
+                    })}
+                    {adminNotifications.length === 0 && smartAlerts.length === 0 ? (
                       <p className="p-4 text-sm text-center" style={{ color: 'var(--on-surface-variant)' }}>لا توجد إشعارات</p>
                     ) : adminNotifications.map((n, i) => (
                       <div key={i} className="p-3" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
