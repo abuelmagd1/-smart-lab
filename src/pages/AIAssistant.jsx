@@ -251,7 +251,28 @@ const wrapCopyableNumbers = (html) => {
   }
 }
 
-const SUGGESTIONS = ['سجّل مريض جديد', 'إيه أسباب ارتفاع السكر؟', 'اعرض حالة مريض معين', 'افتح تقرير مريض للطباعة']
+// اقتراحات متنوعة تظهر أول ما المحادثة تبدأ - بتوضح للمستخدم حاجات كتير الأداة
+// تقدر تعملها ومش بالضرورة يعرف عنها (زي المستلزمات، الأطباء، الإشعارات)،
+// مش بس "سجّل مريض" اللي هي أوضح استخدام. بنعرض عينة عشوائية مختلفة كل مرة
+// (4 من 10) عشان مع الوقت المستخدم يكتشف كل القدرات المتاحة بدل ما يفضل
+// شايف نفس الأربعة دايمًا.
+const ALL_SUGGESTIONS = [
+  'سجّل مريض جديد',
+  'إيه أسباب ارتفاع السكر؟',
+  'اعرض حالة مريض معين',
+  'افتح تقرير مريض للطباعة',
+  'فيه أصناف ناقصة في المخزون؟',
+  'هات قايمة الأطباء المحوّلين',
+  'اعمل تقرير مالي عن الشهر ده',
+  'مين أكتر دكتور بيحوّل حالات؟',
+  'سجّل مصروف جديد',
+  'هات نتايج مرضى النهارده',
+]
+const SUGGESTIONS = ALL_SUGGESTIONS
+  .map(function (s) { return { s: s, sort: Math.random() } })
+  .sort(function (a, b) { return a.sort - b.sort })
+  .slice(0, 4)
+  .map(function (x) { return x.s })
 
 const MAX_RECORDING_MS = 120000
 const MAX_IMAGES = 4
@@ -1761,7 +1782,9 @@ export default function AIAssistant() {
 
     if (name === 'manage_referring_doctor') {
       try {
-        const action = args.action
+        // لو الموديل نسي يحدد action (بيحصل أحيانًا مع نماذج أضعف)، الافتراضي
+        // الأأمن هو "list" - يوريه البيانات المتاحة بدل ما يوقّفه برسالة مبهمة
+        const action = args.action || 'list'
         const targetName = (args.doctor_name || '').trim()
         if (action !== 'list') showStatus('⏳ بيحدّث بيانات الأطباء المحوّلين...')
 
@@ -1822,7 +1845,8 @@ export default function AIAssistant() {
 
     if (name === 'manage_supply') {
       try {
-        const action = args.action
+        // زي manage_referring_doctor: لو الموديل نسي action، الافتراضي الأأمن list
+        const action = args.action || 'list'
 
         if (action === 'list') {
           const res = await supabase.from('lab_supplies').select('*').order('name')
@@ -1985,7 +2009,8 @@ export default function AIAssistant() {
 
     if (name === 'manage_test_catalog') {
       try {
-        const action = args.action
+        // زي باقي أدوات manage_*: لو الموديل نسي action، الافتراضي الأأمن list
+        const action = args.action || 'list'
 
         if (action === 'list') {
           const items = (await getTestCatalogCached()).slice().sort(function (a, b) { return (a.name || '').localeCompare(b.name || '', 'ar') })
@@ -2722,6 +2747,8 @@ function ConfirmCard(props) {
   const data = pending.data
   const error = pending.error
 
+  const missingRequired = type === 'new_patient' && !data.name
+
   return (
     <div className="max-w-lg w-full px-4 py-3 rounded-2xl text-sm bg-white"
       style={{ border: type === 'delete' ? '1.5px solid #dc2626' : '1.5px solid var(--primary-container)', lineHeight: '1.7' }}>
@@ -2730,7 +2757,7 @@ function ConfirmCard(props) {
         <div>
           <p className="font-semibold mb-2" style={{ color: 'var(--on-surface)' }}>📋 تسجيل مريض جديد - يحتاج تأكيدك</p>
           <div className="space-y-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-            <p><strong>الاسم:</strong> {data.name || '-'}</p>
+            <p><strong>الاسم:</strong> {data.name || '-'} {!data.name && <span style={{ color: '#dc2626' }}>(ناقص - لازم اسم قبل الحفظ)</span>}</p>
             <p><strong>السن:</strong> {data.age || '-'} • <strong>النوع:</strong> {data.gender || '-'}</p>
             {data.phone && <p><strong>التليفون:</strong> {data.phone}</p>}
             {data.doctor && <p><strong>الدكتور:</strong> {data.doctor}</p>}
@@ -2776,7 +2803,8 @@ function ConfirmCard(props) {
           <button onClick={onCancel} className="flex-1 py-1.5 rounded-lg text-xs font-medium" style={{ border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
             إلغاء
           </button>
-          <button onClick={onConfirm} className="flex-1 py-1.5 rounded-lg text-xs font-medium text-white" style={{ background: type === 'delete' ? '#dc2626' : 'var(--primary-container)' }}>
+          <button onClick={onConfirm} disabled={missingRequired} className="flex-1 py-1.5 rounded-lg text-xs font-medium text-white"
+            style={{ background: type === 'delete' ? '#dc2626' : 'var(--primary-container)', opacity: missingRequired ? 0.5 : 1, cursor: missingRequired ? 'not-allowed' : 'pointer' }}>
             {type === 'delete' ? '🗑️ تأكيد الحذف' : '✅ تأكيد الحفظ'}
           </button>
         </div>
